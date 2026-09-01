@@ -77,13 +77,16 @@ def test_diagnostics_address_contract():
     import asyncio
 
     from bsl_ls_mcp.application import tools as T
-    from bsl_ls_mcp.settings import get_settings
+    from bsl_ls_mcp.settings import Settings, get_settings
 
     class FakeAnalyzer:
         async def analyze(self, src_dir):
             return []
 
-    deps = T.Deps(lsp=None, analyzer=FakeAnalyzer(), settings=get_settings())
+    # WS должен быть под allowed_roots, иначе path-режим отвергнет его конфайнментом.
+    cfg = Settings(**{**get_settings().__dict__, "workspace": WS.resolve(),
+                      "allowed_roots": (WS.resolve(),)})
+    deps = T.Deps(lsp=None, analyzer=FakeAnalyzer(), settings=cfg)
 
     def must_raise(**kw):
         try:
@@ -207,6 +210,68 @@ def test_diagnostic_and_location():
     loc = mapper.location_to_code_location({"uri": MOD_URI, "range": {"start": {"line": 0}}})
     assert loc.type == "ОбщийМодуль" and loc.module == "ТестОбщийМодуль"
     assert loc.line == 1 and loc.text.startswith("Функция ВычислитьСумму")
+
+
+# ---------- security: конфайнмент путей и валидация имён ----------
+def test_valid_segment():
+    assert resolver.valid_segment("ТестОбщийМодуль")
+    assert resolver.valid_segment("Common_Module2")
+    for bad in ("..", "../x", r"..\x", "a/b", r"a\b", "C:", "a:b", "a b", ".", "a.b", ""):
+        assert not resolver.valid_segment(bad), bad
+
+
+def test_within_roots():
+    root = WS.resolve()
+    assert resolver.within_roots(WS / "CommonModules", [root])
+    assert resolver.within_roots(WS, [root])
+    # выход наружу через .. — отвергнут
+    assert not resolver.within_roots(WS / ".." / ".." / "etc", [root])
+    # абсолютный путь мимо корня
+    assert not resolver.within_roots(Path(r"C:\Windows\System32"), [root])
+    # UNC — отвергнут (иначе исходящий SMB и утечка NTLM)
+    assert not resolver.within_roots(Path(r"\\attacker\share\x"), [root])
+    assert not resolver.within_roots(Path("//attacker/share/x"), [root])
+
+
+def test_resolver_rejects_traversal_names():
+    # имя модуля/формы с разделителями пути НЕ строит путь наружу
+    assert resolver.candidate_uris(WS, "ОбщийМодуль", "../../../../Windows") == []
+    assert resolver.diagnostics_src_dir(WS, r"Справочник.....\..\..\Windows") is None
+    uris, _ = resolver.symbol_candidates(WS, "Справочник.../../../x.Форма.y.Метод")
+    assert uris == []
+    assert resolver.module_file_uri(WS, "Справочник.a/b/c") is None
+
+
+def test_diagnostics_path_confinement():
+    # path вне allowed_roots (в т.ч. UNC) отвергается ДО обращения к ФС
+    import asyncio
+
+    from bsl_ls_mcp.application import tools as T
+    from bsl_ls_mcp.settings import Settings, get_settings
+
+    base = get_settings()
+    confined = Settings(**{**base.__dict__, "workspace": WS.resolve(),
+                           "allowed_roots": (WS.resolve(),)})
+
+    class FakeAnalyzer:
+        async def analyze(self, src_dir):
+            return []
+
+    deps = T.Deps(lsp=None, analyzer=FakeAnalyzer(), settings=confined)
+
+    def must_raise(path):
+        try:
+            asyncio.run(T.bsl_diagnostics(deps, path=path))
+        except T.ResolveError:
+            return
+        raise AssertionError(f"ожидали ResolveError для path={path!r}")
+
+    must_raise(r"C:\Windows\System32")           # вне корня
+    must_raise(r"\\attacker\share")              # UNC
+    must_raise(str(WS / ".." / ".." / "Windows"))  # обход через ..
+    # путь под корнем проходит конфайнмент
+    r = asyncio.run(T.bsl_diagnostics(deps, path=str(WS)))
+    assert r == {"diagnostics": [], "suppressed": {"total": 0, "by_code": []}}
 
 
 def main():

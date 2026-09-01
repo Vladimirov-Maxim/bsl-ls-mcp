@@ -78,6 +78,8 @@ New-Item -ItemType Directory -Force (Join-Path $bundle "server") | Out-Null
 # Vendor jar (BSL Language Server, LGPL-3.0) is NOT committed to this repo — it is
 # downloaded from the upstream release on first build and cached in server\ for reuse.
 $jarVer = "0.29.0"
+# Pinned SHA256 of bsl-language-server-0.29.0-exec.jar (upstream GitHub release).
+$jarSha256 = "D6FA9AD638BA51855E260B88AD1F8CE4E602385845A4EE43600D148F779BCF0B"
 $srcJar = "server\bsl-language-server-$jarVer-exec.jar"
 if ((-not (Test-Path $srcJar)) -or ((Get-Item $srcJar).Length -lt 1MB)) {
   Write-Host "[build] downloading BSL Language Server $jarVer (upstream release)..." -ForegroundColor Cyan
@@ -89,6 +91,13 @@ if ((-not (Test-Path $srcJar)) -or ((Get-Item $srcJar).Length -lt 1MB)) {
   if ((Get-Item $srcJar).Length -lt 1MB) {
     Write-Host "[build] FAIL: downloaded jar is suspiciously small (<1MB)" -ForegroundColor Red; exit 1
   }
+}
+# Verify integrity of the cached/downloaded jar (upstream could be tampered/mirror-swapped).
+$jarGot = (Get-FileHash $srcJar -Algorithm SHA256).Hash
+if ($jarGot -ne $jarSha256) {
+  Write-Host "[build] FAIL: jar SHA256 mismatch (expected $jarSha256, got $jarGot)" -ForegroundColor Red
+  Write-Host "        delete '$srcJar' to force a clean re-download." -ForegroundColor Red
+  exit 1
 }
 Copy-Item $srcJar (Join-Path $bundle "server\") -Force
 Copy-Item "run.cmd" $bundle -Force

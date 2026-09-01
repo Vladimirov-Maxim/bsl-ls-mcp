@@ -3,11 +3,43 @@
 (documentSymbol) в application — без текстового угадывания по .bsl."""
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .one_c_config_path import _TYPE_EN_TO_DIR
 from .one_c_naming import type_ru_to_en
+
+# Имя объекта/модуля/формы 1С — идентификатор: буквы (лат./кир.), цифры, подчёркивание.
+# НИКАКИХ / \ : . пробелов — иначе сегмент имени уводит путь наружу (обход каталога,
+# абсолютная замена базы, UNC). Валидируем каждый сегмент перед подстановкой в путь.
+_SAFE_SEGMENT = re.compile(r"^[0-9A-Za-z_Ѐ-ӿ]+$")
+
+
+def valid_segment(name: str) -> bool:
+    """Безопасный сегмент имени (без разделителей пути и точек)."""
+    return bool(_SAFE_SEGMENT.match(name))
+
+
+def within_roots(path: Path, roots: Iterable[Path]) -> bool:
+    """path (после resolve) лежит под одним из roots? Блокирует '..', абсолютную замену
+    базы и UNC (иначе `path=\\\\host\\share` = исходящий SMB и утечка NTLM-хэша)."""
+    if str(path).startswith(("\\\\", "//")):        # UNC до resolve
+        return False
+    try:
+        rp = path.resolve()
+    except (OSError, ValueError, RuntimeError):
+        return False
+    if str(rp).startswith(("\\\\", "//")):           # resolve развернул в UNC
+        return False
+    for root in roots:
+        try:
+            rp.relative_to(Path(root).resolve())
+            return True
+        except (ValueError, OSError):
+            continue
+    return False
 
 # Кандидаты bsl-модулей по типу объекта. Общий модуль — единственный Module.bsl;
 # прикладной объект — символ может быть в модуле менеджера/объекта/набора записей.
@@ -31,7 +63,7 @@ class Position:
 
 def _candidate_files(workspace: Path, type_en: str, module: str) -> list[Path]:
     directory = _TYPE_EN_TO_DIR.get(type_en)
-    if directory is None:
+    if directory is None or not valid_segment(module):
         return []
     rels = _MODULE_CANDIDATES.get(type_en, _MODULE_CANDIDATES["_default"])
     return [workspace / directory / module / rel for rel in rels]
@@ -71,7 +103,7 @@ def diagnostics_src_dir(workspace: Path, full_name: str) -> Path | None:
         return None
     type_en = type_ru_to_en(parts[0])
     directory = _TYPE_EN_TO_DIR.get(type_en) if type_en else None
-    if directory is None:
+    if directory is None or not valid_segment(parts[1]):
         return None
     base = workspace / directory / parts[1]
     # Форма (и команда) — по МАРКЕРУ на 3-й позиции, без завязки на хвост:
@@ -79,7 +111,7 @@ def diagnostics_src_dir(workspace: Path, full_name: str) -> Path | None:
     # 'Тип.Объект.Форма.Имя.Форма'. Маркер задаёт подкаталог Ext.
     _SUBDIR = {"Форма": ("Forms", "Ext/Form"), "Form": ("Forms", "Ext/Form"),
                "Команда": ("Commands", "Ext"), "Command": ("Commands", "Ext")}
-    if len(parts) >= 4 and parts[2] in _SUBDIR:
+    if len(parts) >= 4 and parts[2] in _SUBDIR and valid_segment(parts[3]):
         folder, ext = _SUBDIR[parts[2]]
         d = base / folder / parts[3]
         for seg in ext.split("/"):
@@ -116,16 +148,16 @@ def symbol_candidates(workspace: Path, full_name: str) -> tuple[list[str], str]:
         raise ValueError(f"ожидался формат Тип.Модуль.Символ, получено: {full_name!r}")
     type_en = type_ru_to_en(parts[0])
     directory = _TYPE_EN_TO_DIR.get(type_en) if type_en else None
-    if directory is None:
+    if directory is None or not valid_segment(parts[1]):
         return [], ".".join(parts[2:])
     base = workspace / directory / parts[1]
 
     def _one(fpath: Path, symbol: str) -> tuple[list[str], str]:
         return ([fpath.resolve().as_uri()] if fpath.exists() else []), symbol
 
-    if len(parts) >= 5 and parts[2] in _FORM_MARK:
+    if len(parts) >= 5 and parts[2] in _FORM_MARK and valid_segment(parts[3]):
         return _one(base / "Forms" / parts[3] / "Ext" / "Form" / "Module.bsl", ".".join(parts[4:]))
-    if len(parts) >= 5 and parts[2] in _CMD_MARK:
+    if len(parts) >= 5 and parts[2] in _CMD_MARK and valid_segment(parts[3]):
         return _one(base / "Commands" / parts[3] / "Ext" / "CommandModule.bsl", ".".join(parts[4:]))
     if len(parts) >= 4 and parts[2] in _KIND_FILE:
         return _one(base / "Ext" / _KIND_FILE[parts[2]], ".".join(parts[3:]))
@@ -145,16 +177,16 @@ def module_file_uri(workspace: Path, module_full_name: str) -> str | None:
         return None
     type_en = type_ru_to_en(parts[0])
     directory = _TYPE_EN_TO_DIR.get(type_en) if type_en else None
-    if directory is None:
+    if directory is None or not valid_segment(parts[1]):
         return None
     base = workspace / directory / parts[1]
 
     def _u(p: Path) -> str | None:
         return p.resolve().as_uri() if p.exists() else None
 
-    if len(parts) >= 4 and parts[2] in _FORM_MARK:
+    if len(parts) >= 4 and parts[2] in _FORM_MARK and valid_segment(parts[3]):
         return _u(base / "Forms" / parts[3] / "Ext" / "Form" / "Module.bsl")
-    if len(parts) >= 4 and parts[2] in _CMD_MARK:
+    if len(parts) >= 4 and parts[2] in _CMD_MARK and valid_segment(parts[3]):
         return _u(base / "Commands" / parts[3] / "Ext" / "CommandModule.bsl")
     if len(parts) >= 3 and parts[2] in _KIND_FILE:
         return _u(base / "Ext" / _KIND_FILE[parts[2]])

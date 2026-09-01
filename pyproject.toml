@@ -13,7 +13,8 @@ keywords = ["1c", "bsl", "language-server", "lsp", "mcp"]
 
 # Рантайм: только MCP SDK (он же тянет uvicorn/starlette для sse/streamable-http).
 # LSP-клиент — на стандартной библиотеке (asyncio), без доп. пакетов.
-dependencies = ["mcp>=1.2.0"]
+# >=1.9.4 — версия с защитой от DNS-rebinding (валидация Host/Origin) в HTTP-транспорте.
+dependencies = ["mcp>=1.9.4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]

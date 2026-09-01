@@ -17,6 +17,9 @@ class Settings:
     # --- источник и пути ---
     jar_path: Path           # исполняемый jar BSL LS (pin версии — в server/)
     workspace: Path          # исходники базы 1С (рабочая копия, её индексирует сервер)
+    allowed_roots: tuple[Path, ...]  # корни, под которыми разрешён анализ (конфайнмент
+                             # path-режима и резолва имён): workspace + BSL_ALLOWED_ROOTS.
+                             # Всё вне них отклоняется — защита от обхода каталога/UNC.
     bsl_config: Path | None  # путь к .bsl-language-server.json, необязателен
     server_log: Path | None  # куда писать stderr java-сервера (для диагностики); None — отбрасывать
     status_file: Path        # файл состояния индекса (idle/building/ready) — читает трей
@@ -61,9 +64,14 @@ class Settings:
         # Статус-файл в ProgramData — единый путь для службы (LocalSystem) и трея (юзер).
         status = os.environ.get("BSL_STATUS_FILE") or str(
             Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "bsl-ls-mcp" / "status.json")
+        ws = Path(os.environ.get("BSL_WORKSPACE", r"C:\1c\src\cf"))
+        # Доп. корни для path-режима (внешние обработки и т.п.) — через ; (Windows).
+        extra_roots = [Path(p.strip()) for p in os.environ.get("BSL_ALLOWED_ROOTS", "").split(";")
+                       if p.strip()]
         return Settings(
             jar_path=Path(os.environ.get("BSL_LS_JAR", str(default_jar))),
-            workspace=Path(os.environ.get("BSL_WORKSPACE", r"C:\1c\src\cf")),
+            workspace=ws,
+            allowed_roots=(ws, *extra_roots),
             bsl_config=Path(cfg) if cfg else None,
             server_log=Path(log) if log else None,
             status_file=Path(status),

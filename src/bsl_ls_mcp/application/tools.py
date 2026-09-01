@@ -143,6 +143,13 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
         src_dir, fallback = tmp_dir, "<snippet>"
     elif path is not None:
         p = Path(path)
+        # Конфайнмент: путь обязан лежать под workspace или одним из BSL_ALLOWED_ROOTS.
+        # Иначе path-режим — оракул ФС (перебор каталогов), утечка содержимого чужих
+        # файлов и, для UNC, исходящий SMB с утечкой NTLM-хэша сервисного аккаунта.
+        if not resolver.within_roots(p, deps.settings.allowed_roots):
+            raise ResolveError(
+                f"путь вне разрешённых корней: {path!r}. Разрешены workspace и "
+                f"BSL_ALLOWED_ROOTS; UNC-пути (\\\\host\\share) запрещены.")
         if not p.exists():
             raise ResolveError(f"путь не найден: {path!r}")
         src_dir = p if p.is_dir() else p.parent

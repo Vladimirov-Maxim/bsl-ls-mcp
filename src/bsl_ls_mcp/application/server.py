@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import os
 
 from mcp.server.fastmcp import FastMCP
 
@@ -19,8 +20,24 @@ from ..settings import get_settings
 from . import tools
 from .tools import Deps
 
+_LOOPBACK = {"127.0.0.1", "::1", "localhost", ""}
+
+
+def _guard_bind_host(host: str) -> None:
+    """Сервер НЕ аутентифицирует вызовы: любой, кто достучится до порта, получает все
+    инструменты (обход каталога, чтение файлов, DoS реиндексом). Поэтому привязку к
+    не-loopback интерфейсу требуем подтвердить явным BSL_ALLOW_REMOTE=1 — случайный
+    `BSL_MCP_HOST=0.0.0.0` не должен молча выставить демон в сеть."""
+    if host not in _LOOPBACK and os.environ.get("BSL_ALLOW_REMOTE") not in {"1", "true", "yes"}:
+        raise RuntimeError(
+            f"BSL_MCP_HOST={host!r} выставляет незащищённый MCP-эндпоинт в сеть. "
+            "Демон не аутентифицирует вызовы — поставьте перед ним обратный прокси с "
+            "авторизацией/TLS. Чтобы всё же слушать этот адрес, задайте BSL_ALLOW_REMOTE=1.")
+
+
 # host/port сетевого транспорта — из настроек (инкапсулировано в Settings).
 _s = get_settings()
+_guard_bind_host(_s.mcp_host)
 mcp = FastMCP("bsl-ls", host=_s.mcp_host, port=_s.mcp_port)
 
 # Очередь: ограничиваем число одновременных операций к единственной LSP-сессии.
