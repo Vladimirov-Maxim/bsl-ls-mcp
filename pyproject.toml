@@ -17,7 +17,9 @@ keywords = ["1c", "bsl", "language-server", "lsp", "mcp"]
 dependencies = ["mcp>=1.9.4"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.8"]
+# ruff запинен точно: дефолтный набор правил дрейфует между версиями (см. [tool.ruff.lint]),
+# незапиненный ruff делал CI недетерминированным. Обновлять вместе с прогоном линта.
+dev = ["pytest>=8", "ruff==0.16.5"]
 build = ["pyinstaller>=6"]
 
 [project.scripts]
@@ -37,5 +39,9 @@ line-length = 100
 src = ["src", "scripts", "tests"]
 
 [tool.ruff.lint]
+# ЯВНЫЙ набор правил (классический дефолт ruff), а не неявный: дефолтная выборка
+# ruff расширяется от версии к версии (0.16 стала тянуть bandit/pylint/blind-except),
+# и без пина набора CI зелёный/красный зависел бы от версии ruff. Фиксируем — детерминизм.
+select = ["E4", "E7", "E9", "F"]
 # E731 — присваивание lambda: допускаем как компактные тест-хелперы.
 ignore = ["E731"]
