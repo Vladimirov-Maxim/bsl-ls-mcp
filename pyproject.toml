@@ -14,7 +14,9 @@ keywords = ["1c", "bsl", "language-server", "lsp", "mcp"]
 # Рантайм: только MCP SDK (он же тянет uvicorn/starlette для sse/streamable-http).
 # LSP-клиент — на стандартной библиотеке (asyncio), без доп. пакетов.
 # >=1.9.4 — версия с защитой от DNS-rebinding (валидация Host/Origin) в HTTP-транспорте.
-dependencies = ["mcp>=1.9.4"]
+# <2 — ОБЯЗАТЕЛЬНО: mcp 2.x переименовал FastMCP -> MCPServer и сломал API; весь код на
+# v1 (FastMCP), без верхней границы свежая установка тянет 2.x и демон не импортируется.
+dependencies = ["mcp>=1.9.4,<2"]
 
 [project.optional-dependencies]
 # ruff запинен точно: дефолтный набор правил дрейфует между версиями (см. [tool.ruff.lint]),
