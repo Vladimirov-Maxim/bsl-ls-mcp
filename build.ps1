@@ -14,9 +14,9 @@ $bundle = Join-Path $root "dist\bsl-ls-mcp"
 # Preserve manually-added extras (downloaded once) across rebuilds: PyInstaller wipes dist\.
 $cache = Join-Path $root ".bundle-extras"
 $extras = @("jre", "nssm.exe", "bsl-ls-tray.exe")
-# RECOVERY: если ПРОШЛАЯ сборка упала ПОСЛЕ move-в-кэш, но ДО restore — extras остались
-# в кэше, а в бандле их нет. Тогда сначала вернём их из кэша, иначе следующий
-# Remove-Item $cache сотрёт их насовсем (так и потеряли jre+nssm однажды).
+# RECOVERY: if a PREVIOUS build died AFTER move-to-cache but BEFORE restore, extras are
+# left in the cache and missing from the bundle. Restore them from the cache first, else
+# the Remove-Item $cache below wipes them for good (this is how jre+nssm were lost once).
 if (Test-Path $cache) {
   New-Item -ItemType Directory -Force $bundle | Out-Null
   foreach ($x in $extras) {
@@ -32,9 +32,9 @@ foreach ($x in $extras) {
 }
 
 Write-Host "[build] PyInstaller install..." -ForegroundColor Cyan
-# ПИН версии, не --upgrade: прошлый --upgrade оставил ДВЕ dist-info (6.21 + 6.22) в
-# одном site-packages -> importlib.metadata.version('pyinstaller')=None -> хук pywintypes
-# падал 'Version(None)'. Фиксируем известную рабочую версию.
+# PIN the version, not --upgrade: a past --upgrade left TWO dist-info dirs (6.21 + 6.22)
+# in one site-packages -> importlib.metadata.version('pyinstaller')=None -> the pywintypes
+# hook crashed on 'Version(None)'. Pin a known-good version.
 py -3 -m pip install --quiet "pyinstaller==6.22.2" 2>&1 | Out-Null
 
 Write-Host "[build] running PyInstaller (onedir)..." -ForegroundColor Cyan
@@ -56,7 +56,7 @@ py -3 -m PyInstaller --noconfirm --clean `
   --hidden-import mcp.server.streamable_http `
   scripts\run_mcp.py 2>&1 | Out-Null
 
-function Restore-Extras {  # вернуть extras из кэша в бандл (при выходе — успех или провал)
+function Restore-Extras {  # move extras from cache back into the bundle (on any exit)
   New-Item -ItemType Directory -Force $bundle | Out-Null
   foreach ($x in $extras) {
     $c = Join-Path $cache $x
@@ -64,8 +64,8 @@ function Restore-Extras {  # вернуть extras из кэша в бандл (
   }
 }
 if ($LASTEXITCODE -ne 0) {
-  Restore-Extras   # НЕ бросать extras в кэше при провале — иначе следующая сборка их сотрёт
-  Write-Host "[build] PyInstaller FAILED (exit $LASTEXITCODE) — extras восстановлены" -ForegroundColor Red
+  Restore-Extras   # do NOT leave extras in the cache on failure, else the next build wipes them
+  Write-Host "[build] PyInstaller FAILED (exit $LASTEXITCODE) - extras restored" -ForegroundColor Red
   exit 1
 }
 
@@ -75,7 +75,7 @@ if (-not (Test-Path (Join-Path $bundle "bsl-ls-mcp.exe"))) {
 
 Write-Host "[build] assembling bundle layout..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force (Join-Path $bundle "server") | Out-Null
-# Vendor jar (BSL Language Server, LGPL-3.0) is NOT committed to this repo — it is
+# Vendor jar (BSL Language Server, LGPL-3.0) is NOT committed to this repo - it is
 # downloaded from the upstream release on first build and cached in server\ for reuse.
 $jarVer = "0.29.0"
 # Pinned SHA256 of bsl-language-server-0.29.0-exec.jar (upstream GitHub release).

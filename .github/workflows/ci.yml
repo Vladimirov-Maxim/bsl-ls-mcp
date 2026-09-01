@@ -8,7 +8,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Windows-only проект (служба/NSSM/Job Object/трей); тесты домена оперируют
+    # путями CR-выгрузки в Windows-раскладке — гоняем на той ОС, что и рантайм.
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
