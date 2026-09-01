@@ -14,12 +14,14 @@ from .one_c_naming import type_ru_to_en
 # Имя объекта/модуля/формы 1С — идентификатор: буквы (лат./кир.), цифры, подчёркивание.
 # НИКАКИХ / \ : . пробелов — иначе сегмент имени уводит путь наружу (обход каталога,
 # абсолютная замена базы, UNC). Валидируем каждый сегмент перед подстановкой в путь.
-_SAFE_SEGMENT = re.compile(r"^[0-9A-Za-z_Ѐ-ӿ]+$")
+_SAFE_SEGMENT = re.compile(r"[0-9A-Za-z_Ѐ-ӿ]+")
 
 
 def valid_segment(name: str) -> bool:
-    """Безопасный сегмент имени (без разделителей пути и точек)."""
-    return bool(_SAFE_SEGMENT.match(name))
+    """Безопасный сегмент имени (без разделителей пути и точек). fullmatch, а НЕ match+$:
+    в Python '$' совпадает и перед хвостовым '\\n', т.е. 'Модуль\\n' прошёл бы — fullmatch
+    требует, чтобы регулярка покрыла ВСЮ строку целиком."""
+    return bool(_SAFE_SEGMENT.fullmatch(name))
 
 
 def within_roots(path: Path, roots: Iterable[Path]) -> bool:

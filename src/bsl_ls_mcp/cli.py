@@ -46,9 +46,13 @@ def main(argv: list[str] | None = None) -> None:
         _selftest(args.selftest or None)
         return
 
-    from .application.server import mcp  # только демон: тут создаются _deps и atexit
+    from .application.server import guard_bind_host, mcp  # только демон: тут создаются _deps и atexit
 
     if args.transport in ("sse", "streamable-http"):
+        # ФАКТИЧЕСКИЙ адрес привязки — args.host (флаг переопределяет ENV), поэтому
+        # охранник обязан проверять именно его: иначе `--host 0.0.0.0` обходит проверку,
+        # сделанную при импорте только над ENV-host.
+        guard_bind_host(args.host)
         # Демон: java поднимется лениво при первом вызове; агенты подключаются по URL.
         mcp.settings.host = args.host
         mcp.settings.port = args.port

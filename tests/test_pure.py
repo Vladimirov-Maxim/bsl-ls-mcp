@@ -216,8 +216,35 @@ def test_diagnostic_and_location():
 def test_valid_segment():
     assert resolver.valid_segment("ТестОбщийМодуль")
     assert resolver.valid_segment("Common_Module2")
-    for bad in ("..", "../x", r"..\x", "a/b", r"a\b", "C:", "a:b", "a b", ".", "a.b", ""):
-        assert not resolver.valid_segment(bad), bad
+    # хвостовой перевод строки НЕ проходит (fullmatch, а не match+$)
+    for bad in ("..", "../x", r"..\x", "a/b", r"a\b", "C:", "a:b", "a b", ".", "a.b", "",
+                "Модуль\n", "Модуль\r\n", "a\nb"):
+        assert not resolver.valid_segment(bad), repr(bad)
+
+
+def test_guard_bind_host():
+    import os
+
+    from bsl_ls_mcp.application.server import guard_bind_host
+
+    for h in ("127.0.0.1", "::1", "localhost"):
+        guard_bind_host(h)   # loopback — не бросает
+    prev = os.environ.pop("BSL_ALLOW_REMOTE", None)
+    try:
+        # пустой host = bind на все интерфейсы -> бросаем (регресс B); 0.0.0.0/внешний — тоже
+        for bad in ("", "0.0.0.0", "192.168.1.10"):
+            try:
+                guard_bind_host(bad)
+                assert False, f"ожидали RuntimeError для host={bad!r}"
+            except RuntimeError:
+                pass
+        os.environ["BSL_ALLOW_REMOTE"] = "1"
+        guard_bind_host("0.0.0.0")   # явный opt-in — разрешено
+    finally:
+        if prev is None:
+            os.environ.pop("BSL_ALLOW_REMOTE", None)
+        else:
+            os.environ["BSL_ALLOW_REMOTE"] = prev
 
 
 def test_within_roots():

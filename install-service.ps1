@@ -81,11 +81,23 @@ try {
   }
 } catch {}
 
-# (#6) Status dir lives in world-writable %ProgramData%. Pre-create it with a tight ACL
-# so a non-admin can't pre-plant a junction/symlink there (SYSTEM then follows it on write).
-# SYSTEM+Admins full (service writes), Authenticated Users read-only (tray reads status.json).
+# (#6) Status dir lives in world-writable %ProgramData%. A non-admin can pre-plant it (or
+# a junction pointing elsewhere) BEFORE install, so icacls alone is not enough: it would
+# apply to the junction target and the attacker (still the owner) could rewrite the DACL.
 $statusDir = Join-Path $env:ProgramData "bsl-ls-mcp"
-if (-not (Test-Path $statusDir)) { New-Item -ItemType Directory -Path $statusDir -Force | Out-Null }
+if (Test-Path $statusDir) {
+  $it = Get-Item $statusDir -Force
+  if ($it.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    Write-Host "[svc] '$statusDir' is a reparse point (junction/symlink) - possible pre-plant. Aborting." -ForegroundColor Red
+    Write-Host "        Inspect and remove it manually, then re-run." -ForegroundColor Red
+    exit 1
+  }
+} else {
+  New-Item -ItemType Directory -Path $statusDir -Force | Out-Null
+}
+# Seize ownership first (a pre-plant leaves the attacker as owner -> they keep WRITE_DAC),
+# then lock the DACL: SYSTEM+Admins full (service writes), Authenticated Users read (tray reads).
+& icacls "$statusDir" /setowner "*S-1-5-32-544" | Out-Null
 & icacls "$statusDir" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-11:(OI)(CI)R" | Out-Null
 
 Write-Host "[svc] installing service '$ServiceName'..." -ForegroundColor Cyan
