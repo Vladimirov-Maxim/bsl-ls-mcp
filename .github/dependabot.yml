@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Зависимости Python (pyproject: mcp, а также dev — pytest/ruff). Ловит дрейф вроде
+  # mcp 2.x и обновлений ruff, которые ломали CI — открывает PR, а не падает молча.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+
+  # Версии GitHub Actions (checkout/setup-python) — чтобы не отставали и не тянули
+  # deprecated-раннеры Node.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
