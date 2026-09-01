@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bsl-ls-mcp"
+version = "0.1.0"
+description = "MCP-обёртка над BSL Language Server: диагностики и навигация по коду 1С для пайплайна агентов"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Vladimirov-Maxim", email = "104799483+Vladimirov-Maxim@users.noreply.github.com" }]
+keywords = ["1c", "bsl", "language-server", "lsp", "mcp"]
+
+# Рантайм: только MCP SDK (он же тянет uvicorn/starlette для sse/streamable-http).
+# LSP-клиент — на стандартной библиотеке (asyncio), без доп. пакетов.
+dependencies = ["mcp>=1.2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+build = ["pyinstaller>=6"]
+
+[project.scripts]
+# После `pip install .` доступна команда:  bsl-ls-mcp [--transport ...]
+bsl-ls-mcp = "bsl_ls_mcp.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bsl_ls_mcp"]
+# jar сервера НЕ кладём в wheel — он поставляется рядом (server/), путь задаёт BSL_LS_JAR.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "scripts", "tests"]

@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+*.spec
+.bundle-extras/
+.jre-dl/
+
+# Vendor binary — downloaded at build time, NOT committed (see build.ps1)
+server/*.jar
+
+# Portable JRE — added into the bundle, not committed
+jre/
+
+# NSSM — downloaded by install-service.ps1
+nssm.exe
+
+# IDE / editor
+.idea/
+.vscode/
+
+# Logs
+*.log
+*.log.err
+server.log
+bsl-ls-server.log
+out/
