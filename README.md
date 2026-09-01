@@ -1,5 +1,10 @@
 # bsl-ls-mcp
 
+[![tests](https://github.com/Vladimirov-Maxim/bsl-ls-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Vladimirov-Maxim/bsl-ls-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Platform](https://img.shields.io/badge/platform-Windows-informational)
+
 MCP-обёртка над [BSL Language Server](https://github.com/1c-syntax/bsl-language-server)
 для статического анализа и навигации по коду 1С (BSL). Один интерфейс наружу —
 инструменты `mcp__bsl-ls__*` для агентов и любых MCP-клиентов.
