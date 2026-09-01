@@ -4,10 +4,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-informational)
+![maintenance](https://img.shields.io/badge/maintenance-as--is-yellow)
 
 MCP-обёртка над [BSL Language Server](https://github.com/1c-syntax/bsl-language-server)
 для статического анализа и навигации по коду 1С (BSL). Один интерфейс наружу —
 инструменты `mcp__bsl-ls__*` для агентов и любых MCP-клиентов.
+
+> **Статус проекта.** Инструмент рабочий и используется в бою, но развивается по
+> остаточному принципу: делюсь как есть. Активной поддержки, разбора issue и приёма
+> правок в срок не обещаю — реагирую по возможности и без гарантий. Форки и адаптация
+> под свои задачи только приветствуются.
 
 > Подробности (архитектура, сборка, все настройки, внутренняя механика) — в
 > [README_full.md](README_full.md). Здесь — только как запустить и что умеет.
