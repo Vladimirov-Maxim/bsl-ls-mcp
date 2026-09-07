@@ -301,6 +301,48 @@ def test_diagnostics_path_confinement():
     assert r == {"diagnostics": [], "suppressed": {"total": 0, "by_code": []}}
 
 
+# ---------- готовность индекса (_watch_ready): строгий сигнал + предохранитель ----------
+def _client(**over):
+    from bsl_ls_mcp.infrastructure.stdio_lsp_client import StdioLspClient
+    from bsl_ls_mcp.settings import Settings, get_settings
+    base = {"index_grace_sec": 0.3, "index_settle_sec": 0.2, "index_ready_fallback_sec": 1.0}
+    return StdioLspClient(Settings(**{**get_settings().__dict__, **base, **over}))
+
+
+def test_watch_ready_strict_fast():
+    # нормальный путь: тяжёлая фаза с report-тиком → ready по СТРОГОМУ сигналу, быстро
+    import asyncio
+    c = _client(index_ready_fallback_sec=10.0)   # предохранитель далеко — сработать должен строгий
+
+    async def run():
+        c._on_progress({"token": "t", "value": {"kind": "begin"}})
+        c._on_progress({"token": "t", "value": {"kind": "report"}})
+        c._on_progress({"token": "t", "value": {"kind": "end"}})   # tick>=1 → heavy_done
+        task = asyncio.create_task(c._watch_ready())
+        await asyncio.wait_for(c._ready.wait(), timeout=3.0)
+        task.cancel()
+
+    asyncio.run(run())
+    assert c._ready.is_set() and c._heavy_done
+
+
+def test_watch_ready_fallback_degenerate():
+    # вырожденный реиндекс: 'end' тяжёлой фазы потерян → heavy_done не встанет, фаза «активна».
+    # Строгий сигнал не сработает; БЕЗ предохранителя _watch_ready висел бы вечно (статус
+    # навсегда 'building'). Проверяем, что ready всё же выставляется — именно предохранителем.
+    import asyncio
+    c = _client()
+
+    async def run():
+        c._on_progress({"token": "t", "value": {"kind": "begin"}})   # 'end' НЕ шлём
+        task = asyncio.create_task(c._watch_ready())
+        await asyncio.wait_for(c._ready.wait(), timeout=4.0)
+        task.cancel()
+
+    asyncio.run(run())
+    assert c._ready.is_set() and not c._heavy_done   # сработал предохранитель, не строгий сигнал
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

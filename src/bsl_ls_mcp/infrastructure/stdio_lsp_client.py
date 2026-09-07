@@ -68,6 +68,11 @@ class StdioLspClient:
         # не тронет ни status, ни _ready, ни _pending новой (см. _read_loop).
         self._gen += 1
         self._reset_state()
+        # Отменяем задачи прошлой сессии, чтобы старый _watch_ready не крутился параллельно
+        # новому на общем состоянии прогресса (иначе при реиндексе — две гонки за _ready).
+        for t in (self._ready_task, self._reader_task):
+            if t is not None and not t.done():
+                t.cancel()
         stderr = asyncio.subprocess.DEVNULL
         if self._s.server_log:
             self._log_fh = open(self._s.server_log, "ab")  # noqa: SIM115
@@ -221,6 +226,7 @@ class StdioLspClient:
         преждевременное срабатывание."""
         settle = self._s.index_settle_sec
         grace = self._s.index_grace_sec
+        fallback = self._s.index_ready_fallback_sec
         loop = asyncio.get_running_loop()
         t0 = loop.time()
         while not self._progress_seen and loop.time() - t0 < grace:
@@ -229,11 +235,17 @@ class StdioLspClient:
             self._ready.set()  # сервер вообще не шлёт $/progress (нет capability)
             self._write_status("ready")
             return
-        while not (
-            self._heavy_done
-            and not self._progress_active
-            and loop.time() - self._last_progress >= settle
-        ):
+        # СТРОГИЙ сигнал (быстрый, нормальный путь): конец тяжёлой фазы + все фазы закрыты
+        # + короткое затишье. ПРЕДОХРАНИТЕЛЬ (медленный, аварийный): полная тишина прогресса
+        # дольше fallback — на случай вырожденного реиндекса, где строгий сигнал не приходит
+        # (тёплый дисковый кэш → тяжёлая фаза без report-тиков; потерянный 'end'). Иначе
+        # _watch_ready крутился бы вечно и статус навсегда залипал в 'building'. fallback
+        # заведомо длиннее пауз МЕЖДУ фазами при активной индексации, поэтому не ложный.
+        while True:
+            quiet = loop.time() - self._last_progress
+            strict = self._heavy_done and not self._progress_active and quiet >= settle
+            if strict or quiet >= fallback:
+                break
             await asyncio.sleep(0.5)
         self._ready.set()
         self._write_status("ready")

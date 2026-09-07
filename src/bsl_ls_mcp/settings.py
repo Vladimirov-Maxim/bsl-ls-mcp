@@ -48,6 +48,13 @@ class Settings:
     index_wait_timeout: float    # макс. ожидание готовности индекса (предохранитель)
     index_settle_sec: float      # затихание $/progress → индекс готов
     index_grace_sec: float       # ожидание начала $/progress (fallback, если молчит)
+    index_ready_fallback_sec: float  # ПРЕДОХРАНИТЕЛЬ готовности: если $/progress видели, но
+                                 # строгий сигнал (конец тяжёлой фазы с тиками) не пришёл —
+                                 # считаем индекс готовым после стольких секунд ПОЛНОЙ тишины
+                                 # прогресса. Ловит вырожденный реиндекс (тёплый дисковый кэш
+                                 # BSL LS → тяжёлая фаза без report-тиков; потерянный 'end'),
+                                 # из-за которого статус вечно висел в 'building'. Заведомо
+                                 # длиннее пауз МЕЖДУ фазами (те бывают >20 c).
     diagnostics_wait_sec: float  # ожидание publishDiagnostics по файлу
 
     @staticmethod
@@ -89,6 +96,7 @@ class Settings:
             index_wait_timeout=float(os.environ.get("BSL_INDEX_WAIT_TIMEOUT", "1200")),
             index_settle_sec=float(os.environ.get("BSL_INDEX_SETTLE", "3")),
             index_grace_sec=float(os.environ.get("BSL_INDEX_GRACE", "20")),
+            index_ready_fallback_sec=float(os.environ.get("BSL_INDEX_READY_FALLBACK", "90")),
             diagnostics_wait_sec=float(os.environ.get("BSL_DIAGNOSTICS_WAIT", "120")),
         )
 
