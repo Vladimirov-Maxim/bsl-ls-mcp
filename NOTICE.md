@@ -18,6 +18,5 @@ Python runtime dependency:
 Build-time / optional tooling (not required to run the wrapper from source):
 
 - **PyInstaller** (bundling) — GPL v2 with a bundling runtime exception.
-- **pystray**, **Pillow** (system-tray helper) — LGPL-3.0 / HPND respectively.
 - **NSSM** (Windows service shim) — public domain; downloaded by
   `install-service.ps1`, not included here.

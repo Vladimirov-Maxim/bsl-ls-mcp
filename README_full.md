@@ -15,7 +15,6 @@
 server/   bsl-language-server-0.29.0-exec.jar   — сервер (pin v0.29.0)
 pyproject.toml                                  — пакет (pip install -e .), команда bsl-ls-mcp
 build.ps1 + run.cmd                             — сборка нативного бандла + запуск (см. ниже)
-build-tray.ps1                                  — сборка трей-пультика bsl-ls-tray.exe
 install-service.ps1 (+ nssm.exe в бандле)       — установка Windows-службы
 src/bsl_ls_mcp/                                 — обёртка (clean-lite)
   settings.py            пути/память/status-файл из ENV
@@ -32,7 +31,6 @@ src/bsl_ls_mcp/                                 — обёртка (clean-lite)
     stdio_lsp_client     навигация: тёплый java lsp + JSON-RPC по stdio + status-файл
     analyze_cli          проверка кода: разовый java analyze (без индекса) + очередь
   application/     tools (7 инструментов), server (FastMCP, семафор конкурентности)
-tray/tray.py                                     — исходник трей-пультика (лампочка статуса)
 scripts/run_mcp.py                               — entry-point (PyInstaller / запуск без установки)
 scripts/mcp_query.py                             — ручной MCP-запрос к живому демону
 tests/fixtures/smoke_ws/                         — мини-конфигурация для тестов
@@ -108,24 +106,20 @@ powershell -ExecutionPolicy Bypass -File install-service.ps1 -Workspace "E:\1c\s
 Скрипт ставит службу `bsl-ls-mcp` (streamable-http :8081), задаёт ENV, авто-рестарт,
 автозапуск, и стартует её. java гасится вместе со службой через **Job Object**
 (`kill-on-close`) — сирот не остаётся даже при `taskkill /F`.
-```
-sc query bsl-ls-mcp            :: статус
-nssm restart bsl-ls-mcp        :: рестарт
-nssm stop bsl-ls-mcp ; nssm remove bsl-ls-mcp confirm   :: удалить
-```
+Код вне корпуса (внешние обработки для `bsl_diagnostics(path=…)`) — добавьте
+`-AllowedRoots "E:\1c\work"` (несколько корней — через `;`).
 
-### Трей-пультик (опционально, на рабочей станции)
-`bsl-ls-tray.exe` (в бандле) — иконка в области уведомлений с цветной надписью «BSL»,
-отражающей состояние (служба + индекс): 🟢 **готов** · 🟡 **индексирую…** · 🟠 поднята
-(индекса ещё нет) · 🔴 остановлена · ⚪ не установлена. Состояние индекса трей читает из
-status-файла (`BSL_STATUS_FILE`, по умолчанию `%ProgramData%\bsl-ls-mcp\status.json`),
-который пишет демон; служба определяется через `sc query`. Меню: Запустить · Остановить ·
-**Переиндексировать** · Открыть логи · Установить службу. Сам демоном не является —
-командует NSSM-службой (управляющие действия — через UAC). Запуск: `bsl-ls-tray.exe`
-(удобно добавить в автозагрузку пользователя). Сборка: `build-tray.ps1`.
-
-«Переиндексировать» в трее = рестарт службы (полный свежий индекс). Есть и in-place
-реиндекс без обрыва соединений — MCP-инструмент `bsl_reindex` (см. методы).
+### Управление службой
+Отдельного пульта нет — всё штатными средствами Windows и самим MCP:
+```
+sc query bsl-ls-mcp                                        :: служба запущена?
+type %ProgramData%\bsl-ls-mcp\status.json                  :: индекс: idle | building | ready
+nssm restart bsl-ls-mcp                                    :: рестарт (индекс с нуля)
+nssm stop bsl-ls-mcp ; nssm remove bsl-ls-mcp confirm      :: удалить
+```
+Полный реиндекс без обрыва соединений — MCP-инструмент `bsl_reindex` (его может вызвать
+и агент, и любой MCP-клиент; список инструментов с описаниями отдаёт `tools/list`).
+Логи: `service.err.log` (Uvicorn) в папке бандла, stderr java — в `BSL_SERVER_LOG`.
 
 ### Подключение к MCP-клиенту
 Демон поднят (Сценарий А шаг 4 или Б шаг 4; либо как служба). В `.mcp.json` вашего
@@ -175,7 +169,7 @@ bsl-ls-mcp --transport streamable-http --port 8081   # → http://127.0.0.1:8081
 | `BSL_LS_JAR` | `server/bsl-language-server-0.29.0-exec.jar` | путь к jar сервера |
 | `BSL_CONFIG` | — | путь к `.bsl-language-server.json` (необязательно) |
 | `BSL_SERVER_LOG` | — | файл для stderr java-сервера (диагностика); пусто — отбрасывать |
-| `BSL_STATUS_FILE` | `%ProgramData%\bsl-ls-mcp\status.json` | файл состояния индекса (`idle`/`building`/`ready`) — пишет демон, читает трей |
+| `BSL_STATUS_FILE` | `%ProgramData%\bsl-ls-mcp\status.json` | файл состояния индекса (`idle`/`building`/`ready`) — пишет демон; для мониторинга/диагностики |
 | **JVM** | | |
 | `BSL_JAVA` | `java` | путь к java (для portable JRE в бандле); по умолчанию из PATH |
 | `BSL_XMX` | `14g` | память JVM. live-set индекса корпуса ~12.6 ГБ; **Xmx < live-set → вечный GC и зависание** — давать с запасом |
@@ -195,6 +189,7 @@ bsl-ls-mcp --transport streamable-http --port 8081   # → http://127.0.0.1:8081
 | `BSL_INDEX_WAIT_TIMEOUT` | `1200` | макс. ожидание готовности индекса (предохранитель) |
 | `BSL_INDEX_SETTLE` | `3` | затихание `$/progress` → индекс готов |
 | `BSL_INDEX_GRACE` | `20` | ожидание начала `$/progress` (fallback, если сервер молчит) |
+| `BSL_INDEX_READY_FALLBACK` | `90` | предохранитель готовности: если строгий сигнал конца индексации не пришёл, индекс считается готовым после стольких секунд полной тишины `$/progress` (защита от залипания в `building` после реиндекса) |
 | `BSL_DIAGNOSTICS_WAIT` | `120` | ожидание `publishDiagnostics` по файлу |
 
 CLI-флаги `run_mcp.py` (`--transport/--host/--port`) переопределяют ENV при запуске.

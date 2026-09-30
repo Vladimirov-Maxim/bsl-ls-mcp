@@ -22,7 +22,7 @@ class Settings:
                              # Всё вне них отклоняется — защита от обхода каталога/UNC.
     bsl_config: Path | None  # путь к .bsl-language-server.json, необязателен
     server_log: Path | None  # куда писать stderr java-сервера (для диагностики); None — отбрасывать
-    status_file: Path        # файл состояния индекса (idle/building/ready) — читает трей
+    status_file: Path        # файл состояния индекса (idle/building/ready) — для мониторинга
 
     # --- JVM ---
     java_path: str           # путь к java (для portable JRE в бандле); дефолт "java" из PATH

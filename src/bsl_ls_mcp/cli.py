@@ -10,9 +10,9 @@ from .settings import get_settings
 
 # ВАЖНО: application.server НЕ импортируем на уровне модуля. Его тело создаёт _deps и
 # вешает atexit -> lsp.kill(), а kill() пишет в ОБЩИЙ статус-файл. Из-за этого любой
-# CLI-запуск (--reindex) при выходе затирал status работающего демона в idle: трей
-# показывал «индекса нет», пока демон спокойно строил индекс. Импорт — только в
-# демон-ветке main().
+# CLI-запуск (--reindex) при выходе затирал status работающего демона в idle:
+# статус показывал «индекса нет», пока демон спокойно строил индекс. Импорт — только
+# в демон-ветке main().
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--reindex", action="store_true",
         help="Подключиться к УЖЕ запущенному локальному демону и запустить полный "
-             "реиндекс (bsl_reindex), затем выйти. Для трея/скриптов.",
+             "реиндекс (bsl_reindex), затем выйти. Для скриптов.",
     )
     args = parser.parse_args(argv)
 

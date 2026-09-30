@@ -13,7 +13,7 @@ Set-Location $root
 $bundle = Join-Path $root "dist\bsl-ls-mcp"
 # Preserve manually-added extras (downloaded once) across rebuilds: PyInstaller wipes dist\.
 $cache = Join-Path $root ".bundle-extras"
-$extras = @("jre", "nssm.exe", "bsl-ls-tray.exe")
+$extras = @("jre", "nssm.exe")
 # RECOVERY: if a PREVIOUS build died AFTER move-to-cache but BEFORE restore, extras are
 # left in the cache and missing from the bundle. Restore them from the cache first, else
 # the Remove-Item $cache below wipes them for good (this is how jre+nssm were lost once).
@@ -103,7 +103,7 @@ Copy-Item $srcJar (Join-Path $bundle "server\") -Force
 Copy-Item "run.cmd" $bundle -Force
 if (Test-Path "install-service.ps1") { Copy-Item "install-service.ps1" $bundle -Force }
 # restore preserved extras (jre, nssm.exe)
-foreach ($x in @("jre", "nssm.exe", "bsl-ls-tray.exe")) {
+foreach ($x in $extras) {
   $c = Join-Path $cache $x
   if (Test-Path $c) { Move-Item $c (Join-Path $bundle $x) -Force }
 }

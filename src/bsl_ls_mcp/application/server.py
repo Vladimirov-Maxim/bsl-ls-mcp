@@ -101,14 +101,14 @@ async def bsl_diagnostics(module_full_name: str | None = None, path: str | None 
 
 @mcp.tool()
 async def bsl_definition(full_name: str) -> list[dict]:
-    """Где объявлен символ. full_name: 'ОбщийМодуль.МойМодуль.ИмяФункции'."""
+    """Где объявлен метод. full_name: 'ОбщийМодуль.МойМодуль.ИмяФункции'."""
     async with _sem:
         return await tools.bsl_definition(_d(), full_name)
 
 
 @mcp.tool()
 async def bsl_references(full_name: str) -> list[dict]:
-    """Где используется символ. full_name: 'ОбщийМодуль.МойМодуль.ИмяФункции'."""
+    """Где используется метод. full_name: 'ОбщийМодуль.МойМодуль.ИмяФункции'."""
     async with _sem:
         return await tools.bsl_references(_d(), full_name)
 

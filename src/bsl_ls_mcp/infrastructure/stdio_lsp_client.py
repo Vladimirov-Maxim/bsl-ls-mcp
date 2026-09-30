@@ -106,7 +106,7 @@ class StdioLspClient:
             "workspaceFolders": [{"uri": root_uri, "name": "ws"}],
         })
         await self.notify("initialized", {})
-        self._write_status("building")   # индексация пошла → трей покажет «индексирую»
+        self._write_status("building")   # индексация пошла
         # Индексация идёт асинхронно (на корпусе ~1.5 мин). start() НЕ блокируется —
         # готовность выставит watcher; методы порта ждут её (wait_ready).
         self._ready_task = asyncio.create_task(self._watch_ready())
@@ -134,12 +134,13 @@ class StdioLspClient:
         self._diag_waiters.clear()
 
     def _write_status(self, state: str) -> None:
-        """Состояние индекса в файл для трея: idle | building | ready. Best-effort.
+        """Состояние индекса в статус-файл (мониторинг/диагностика): idle | building | ready.
+        Best-effort.
 
         Пишет ТОЛЬКО клиент, который реально поднимал java (_gen > 0). Клиент, ничего
         не запускавший, статус-файл не трогает: иначе любой CLI-процесс (--reindex),
         у которого при импорте создаются _deps + atexit -> kill(), при выходе затирал
-        status работающего демона в idle (трей показывал «индекса нет» во время сборки).
+        status работающего демона в idle («индекса нет» во время сборки).
         """
         if self._gen == 0:
             return

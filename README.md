@@ -46,7 +46,9 @@ run.cmd
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-service.ps1 -Workspace "C:\1c\src\cf"
 ```
-Удобный пультик к службе (лампочка статуса + старт/стоп/переиндекс) — `bsl-ls-tray.exe`.
+Код вне корпуса (внешние обработки) — добавьте `-AllowedRoots "C:\1c\work"`.
+Управление — штатными средствами Windows (`Restart-Service bsl-ls-mcp`), полный реиндекс —
+MCP-инструментом `bsl_reindex`. Состояние индекса — `%ProgramData%\bsl-ls-mcp\status.json`.
 
 ### Вариант 2. С исходников (нужны Python 3.10+ и Java 17+)
 

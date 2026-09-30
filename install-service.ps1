@@ -99,7 +99,7 @@ if (Test-Path $statusDir) {
   New-Item -ItemType Directory -Path $statusDir -Force | Out-Null
 }
 # Seize ownership first (a pre-plant leaves the attacker as owner -> they keep WRITE_DAC),
-# then lock the DACL: SYSTEM+Admins full (service writes), Authenticated Users read (tray reads).
+# then lock the DACL: SYSTEM+Admins full (service writes), Authenticated Users read (monitoring).
 & icacls "$statusDir" /setowner "*S-1-5-32-544" | Out-Null
 & icacls "$statusDir" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-11:(OI)(CI)R" | Out-Null
 
