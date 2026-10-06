@@ -9,6 +9,12 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    # mcp 2.x переименовал FastMCP -> MCPServer и сломал API: код на v1, отсюда пин `mcp<2`.
+    # Мажорный переезд — отдельная задача с правкой кода, не автообновление: такие PR
+    # не предлагать. Минорные и патч-версии 1.x по-прежнему приходят.
+    ignore:
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
 
   # Версии GitHub Actions (checkout/setup-python) — чтобы не отставали и не тянули
   # deprecated-раннеры Node.
