@@ -21,7 +21,7 @@ dependencies = ["mcp>=1.9.4,<2"]
 [project.optional-dependencies]
 # ruff запинен точно: дефолтный набор правил дрейфует между версиями (см. [tool.ruff.lint]),
 # незапиненный ruff делал CI недетерминированным. Обновлять вместе с прогоном линта.
-dev = ["pytest>=8", "ruff==0.16.5"]
+dev = ["pytest>=8", "ruff==0.16.10"]
 build = ["pyinstaller>=6"]
 
 [project.scripts]
