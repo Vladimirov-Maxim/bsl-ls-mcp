@@ -4,10 +4,30 @@
 (Composition root — сборка графа объектов, аналог DI-контейнера.)"""
 from __future__ import annotations
 
-from .domain.ports import CodeAnalyzer, LspServer
+from pathlib import Path
+
+from .domain.ports import ChangeSource, CodeAnalyzer, LspServer
 from .infrastructure.analyze_cli import AnalyzeCliRunner
+from .infrastructure.dir_changes import DirPairChangeSource
+from .infrastructure.git_changes import GitChangeSource
+from .infrastructure.registry_file import load_registry
 from .infrastructure.stdio_lsp_client import StdioLspClient
 from .settings import Settings
+
+
+def build_change_source(settings: Settings, *, repo: str | None = None, base: str = "HEAD",
+                        rev: str | None = None, baseline: str | None = None,
+                        target: str | None = None) -> ChangeSource:
+    """Источник правок задачи: git-репозиторий выгрузки или пара каталогов."""
+    if repo:
+        return GitChangeSource(repo, base or "HEAD", rev, git=settings.git_path)
+    return DirPairChangeSource(baseline, target)
+
+
+def load_rules(settings: Settings, path: str | Path | None) -> dict | None:
+    """Реестр правил проекта: явный путь, иначе BSL_RULES; без них — встроенный каталог."""
+    chosen = path or settings.rules_path
+    return load_registry(chosen) if chosen else None
 
 
 def build_lsp(settings: Settings) -> LspServer:

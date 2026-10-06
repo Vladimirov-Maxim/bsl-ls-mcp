@@ -7,8 +7,39 @@ Protocol, а не от конкретного stdio-клиента → подм�
 resolver/mapper, не порт."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+
+
+class SourceError(Exception):
+    """Источник правок не открылся: нет репозитория/каталога, неверная база, чужой формат
+    выгрузки. Текст — для человека, его показывают как есть."""
+
+
+@dataclass(frozen=True)
+class Change:
+    status: str    # "A" | "M" | "D" (переименование — новый путь со статусом "R")
+    path: str      # от корня выгрузки, прямые косые
+
+
+class ChangeSource(Protocol):
+    """Источник правок задачи для проверок кода: git (база ↔ рабочая копия или ревизия)
+    или пара каталогов эталон ↔ копия. Только чтение."""
+
+    mode: str      # "git" | "каталоги"
+
+    def changes(self) -> list[Change]:
+        """Состав правок: добавленные, изменённые, удалённые файлы."""
+        ...
+
+    def changed_lines(self, change: Change) -> frozenset[int]:
+        """Строки новой версии файла, добавленные или изменённые задачей; новый файл — все."""
+        ...
+
+    def new_text(self, path: str) -> str | None:
+        """Текст новой версии файла (None — файла нет)."""
+        ...
 
 
 class CodeAnalyzer(Protocol):

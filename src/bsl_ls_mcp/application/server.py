@@ -12,12 +12,15 @@ from __future__ import annotations
 import asyncio
 import atexit
 import os
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from ..bootstrap import build_analyzer, build_lsp
+from ..bootstrap import build_analyzer, build_change_source, build_lsp, load_rules
+from ..domain import resolver
 from ..settings import get_settings
 from . import tools
+from .rules_check import InputError, run_rules_check, run_task_methods, source_kind
 from .tools import Deps
 
 # Только эти адреса считаем безопасными по умолчанию. Пустая строка СЮДА НЕ ВХОДИТ:
@@ -127,3 +130,58 @@ async def bsl_reindex() -> dict:
     Точечные правки модулей подхватываются автоматически — это для крупных изменений."""
     async with _sem:
         return await tools.bsl_reindex(_d())
+
+
+# --- проверки кода задачи по правилам проекта (без индекса LSP) ------------------
+
+def _confine(label: str, value: str | None) -> None:
+    if value and not resolver.within_roots(Path(value), _s.allowed_roots):
+        raise InputError(f"{label}: путь вне разрешённых корней ({value}) — разрешены workspace и "
+                         "BSL_ALLOWED_ROOTS; UNC-пути запрещены")
+
+
+def _rules_path(rules: str | None) -> str | None:
+    # Реестр по умолчанию (BSL_RULES) задаёт администратор службы — ему доверяем; явный путь —
+    # только из разрешённых корней, как и всё, что приходит в вызове.
+    if rules and not (_s.rules_path and Path(rules).resolve() == _s.rules_path.resolve()):
+        _confine("rules", rules)
+    return rules
+
+
+def _source(repo: str | None, base: str, rev: str | None, baseline: str | None, target: str | None):
+    source_kind(repo, baseline, target)
+    for label, value in (("repo", repo), ("baseline", baseline), ("target", target)):
+        _confine(label, value)
+    return build_change_source(_s, repo=repo, base=base, rev=rev, baseline=baseline, target=target)
+
+
+@mcp.tool()
+async def bsl_rules_check(repo: str | None = None, base: str = "HEAD", rev: str | None = None,
+                          baseline: str | None = None, target: str | None = None,
+                          rules: str | None = None, paths: list[str] | None = None,
+                          only: list[str] | None = None) -> dict:
+    """Проверка правок задачи по правилам проекта (шаблоны и проверки кода: циклы и чтение
+    базы, форма транзакции, параметры, служебный интерфейс чужих модулей и др.).
+    Источник правок — РОВНО ОДИН: repo (git-репозиторий выгрузки; base — коммит до задачи,
+    rev — ревизия вместо рабочей копии) ИЛИ пара baseline + target (каталоги эталон/копия).
+    Проверяются только строки задачи; новый файл — целиком.
+    rules — реестр правил проекта (JSON; по умолчанию BSL_RULES; без реестра — встроенный
+    каталог проверок). only — подмножество ид правил; paths — только эти пути задачи.
+    Возвращает {"находки":[{ид, уровень, файл, строка, текст, регламент}], "исключены":[...],
+    "пропущено":[{что, почему}]}. Индекс LSP не используется — ответ не зависит от него."""
+    def run() -> dict:
+        source = _source(repo, base, rev, baseline, target)
+        return run_rules_check(source, load_rules(_s, _rules_path(rules)), paths=paths, only=only)
+    return await asyncio.to_thread(run)
+
+
+@mcp.tool()
+async def bsl_task_methods(repo: str | None = None, base: str = "HEAD", rev: str | None = None,
+                           baseline: str | None = None, target: str | None = None,
+                           paths: list[str] | None = None) -> list[dict]:
+    """Новые и изменённые методы задачи: [{файл, модуль, метод, вид, экспорт, строки, статус}],
+    статус — «новый» (объявление добавлено задачей) или «изменён» (правка внутри метода).
+    Источник правок — как у bsl_rules_check: repo (+ base, rev) ИЛИ baseline + target."""
+    def run() -> list[dict]:
+        return run_task_methods(_source(repo, base, rev, baseline, target), paths=paths)
+    return await asyncio.to_thread(run)

@@ -57,6 +57,10 @@ class Settings:
                                  # длиннее пауз МЕЖДУ фазами (те бывают >20 c).
     diagnostics_wait_sec: float  # ожидание publishDiagnostics по файлу
 
+    # --- проверки кода задачи по правилам проекта (bsl_rules_check) ---
+    rules_path: Path | None = None  # реестр правил проекта по умолчанию (BSL_RULES); внешний файл
+    git_path: str = "git"           # git для источника правок (BSL_GIT); служба: полный путь надёжнее
+
     @staticmethod
     def from_env() -> "Settings":
         # База для дефолтного пути к jar: в обычном запуске — корень проекта;
@@ -98,6 +102,8 @@ class Settings:
             index_grace_sec=float(os.environ.get("BSL_INDEX_GRACE", "20")),
             index_ready_fallback_sec=float(os.environ.get("BSL_INDEX_READY_FALLBACK", "90")),
             diagnostics_wait_sec=float(os.environ.get("BSL_DIAGNOSTICS_WAIT", "120")),
+            rules_path=Path(os.environ["BSL_RULES"]) if os.environ.get("BSL_RULES") else None,
+            git_path=os.environ.get("BSL_GIT", "git"),
         )
 
 
