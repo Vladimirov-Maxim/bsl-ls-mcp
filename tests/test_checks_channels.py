@@ -72,6 +72,25 @@ def test_cli_out_file_and_task_methods(task, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)[0]["метод"] == "П"
 
 
+def test_cli_runs_on_standard_library_only(task):
+    """Хук конвейера зовёт `py -m bsl_ls_mcp rules-check` прямо из исходников, без установки
+    пакетов: командная строка проверок не должна тянуть mcp и прочее стороннее. `-S` отключает
+    site-packages — импорт стороннего пакета здесь упадёт."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo, rules = task
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ, PYTHONPATH=src, PYTHONIOENCODING="utf-8")
+    r = subprocess.run([sys.executable, "-S", "-m", "bsl_ls_mcp", "rules-check", "--repo", str(repo),
+                        "--rules", str(rules), "--json"], capture_output=True, env=env)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    result = json.loads(r.stdout.decode("utf-8"))
+    assert [h[1] for h in hits(result, "loop.db-write")] == [3]
+
+
 def test_entry_point_routes_subcommands(task, capsys):
     from bsl_ls_mcp import cli
     repo, rules = task
