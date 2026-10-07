@@ -35,10 +35,14 @@ Write-Host "[build] PyInstaller install..." -ForegroundColor Cyan
 # PIN the version, not --upgrade: a past --upgrade left TWO dist-info dirs (6.21 + 6.22)
 # in one site-packages -> importlib.metadata.version('pyinstaller')=None -> the pywintypes
 # hook crashed on 'Version(None)'. Pin a known-good version.
-py -3 -m pip install --quiet "pyinstaller==6.22.2" 2>&1 | Out-Null
+# Python for the build: active virtualenv (VIRTUAL_ENV) if any - the bundle collects mcp from it;
+# else the system "py -3" (then mcp must be installed there: pip install -e .).
+$py = if ($env:VIRTUAL_ENV -and (Test-Path "$env:VIRTUAL_ENV\Scripts\python.exe")) { "$env:VIRTUAL_ENV\Scripts\python.exe" } else { "py" }
+$pyArgs = if ($py -eq "py") { @("-3") } else { @() }
+& $py @pyArgs -m pip install --quiet "pyinstaller==6.22.2" 2>&1 | Out-Null
 
 Write-Host "[build] running PyInstaller (onedir)..." -ForegroundColor Cyan
-py -3 -m PyInstaller --noconfirm --clean `
+& $py @pyArgs -m PyInstaller --noconfirm --clean `
   --onedir --name bsl-ls-mcp `
   --paths src `
   --collect-submodules mcp.server `
