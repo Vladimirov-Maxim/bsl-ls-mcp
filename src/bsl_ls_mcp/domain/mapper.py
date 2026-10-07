@@ -171,8 +171,15 @@ def analyze_label_from_uri(workspace: Path, uri: str) -> str | None:
         return None
     try:
         ctx = _PATH_PARSER.parse(root=workspace, file_path=uri_to_path(uri))
-    except (ValueError, OSError):
-        return None  # путь не под workspace
+    except ValueError:
+        # пути в разной записи (8.3-имя против длинного, относительный корень) — сверяем
+        # раскрытые; только если и они не вложены — файл не под workspace
+        try:
+            ctx = _PATH_PARSER.parse(root=Path(workspace).resolve(), file_path=uri_to_path(uri).resolve())
+        except (ValueError, OSError):
+            return None
+    except OSError:
+        return None
     if not ctx.object_type or not ctx.object_name:
         return None
     type_ru = type_en_to_ru(ctx.object_type)

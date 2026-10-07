@@ -11,58 +11,36 @@
     Configuration.xml в корне                   Configuration/Configuration.mdo
 
 Каталоги видов (`CommonModules`, `Catalogs`…) и имена файлов модулей совпадают.
-Формат определяется по корню; всё остальное спрашивает отсюда, а не собирает пути само."""
+Pure: только сегменты путей; формат по диску определяет resolver.layout_of."""
 from __future__ import annotations
-
-from functools import lru_cache
-from pathlib import Path
 
 DESIGNER = "designer"
 EDT = "edt"
 
-
-def detect(root: Path) -> str:
-    """Формат исходников по корню. Без корневого файла (часть выгрузки, фикстуры) —
-    по первому общему модулю; совсем без признаков — Designer (прежнее поведение)."""
-    return _detect_cached(str(Path(root)))
-
-
-@lru_cache(maxsize=32)
-def _detect_cached(root_str: str) -> str:
-    root = Path(root_str)
-    if (root / "Configuration.xml").is_file():
-        return DESIGNER
-    if (root / "Configuration" / "Configuration.mdo").is_file():
-        return EDT
-    common = root / "CommonModules"
-    if common.is_dir():
-        for d in common.iterdir():
-            if (d / "Ext").is_dir():
-                return DESIGNER
-            if (d / "Module.bsl").is_file():
-                return EDT
-    return DESIGNER
+# Признак формата в корне исходников (сегменты от корня).
+ROOT_MARKERS: dict[str, tuple[str, ...]] = {
+    DESIGNER: ("Configuration.xml",),
+    EDT: ("Configuration", "Configuration.mdo"),
+}
 
 
-def own_dir(layout: str, base: Path) -> Path:
-    """Каталог собственных модулей объекта (без форм и команд)."""
-    return base / "Ext" if layout == DESIGNER else base
+def own_parts(layout: str) -> tuple[str, ...]:
+    """Сегменты от каталога объекта до его собственных модулей (без форм и команд)."""
+    return ("Ext",) if layout == DESIGNER else ()
 
 
-def form_dir(layout: str, base: Path, form: str) -> Path:
-    """Каталог модуля формы объекта."""
-    d = base / "Forms" / form
-    return d / "Ext" / "Form" if layout == DESIGNER else d
+def form_parts(layout: str, form: str) -> tuple[str, ...]:
+    """Сегменты от каталога объекта до каталога модуля формы."""
+    return ("Forms", form, "Ext", "Form") if layout == DESIGNER else ("Forms", form)
 
 
-def command_dir(layout: str, base: Path, command: str) -> Path:
-    """Каталог модуля команды объекта."""
-    d = base / "Commands" / command
-    return d / "Ext" if layout == DESIGNER else d
+def command_parts(layout: str, command: str) -> tuple[str, ...]:
+    """Сегменты от каталога объекта до каталога модуля команды."""
+    return ("Commands", command, "Ext") if layout == DESIGNER else ("Commands", command)
 
 
 def module_names(layout: str, type_en: str) -> tuple[str, ...]:
-    """Файлы собственных модулей объекта вида `type_en` относительно own_dir —
+    """Файлы собственных модулей объекта вида `type_en` относительно own_parts —
     в порядке перебора при поиске символа."""
     if type_en == "CommonForm":
         return ("Form/Module.bsl",) if layout == DESIGNER else ("Module.bsl",)
@@ -82,6 +60,3 @@ _MODULES: dict[str, tuple[str, ...]] = {
         "ValueManagerModule.bsl",
     ),
 }
-
-# Каталог модулей приложения (сеанса, внешнего соединения…) в корне исходников.
-GLOBAL_MODULE_DIRS = ("Ext", "Configuration")

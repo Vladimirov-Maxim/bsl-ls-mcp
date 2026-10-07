@@ -85,7 +85,7 @@ def _diag_label(workspace: Path, src_dir: Path, d: dict, fallback: str) -> str:
     if label:
         return label
     try:
-        return mapper.uri_to_path(uri).relative_to(src_dir).as_posix()
+        return mapper.uri_to_path(uri).resolve().relative_to(Path(src_dir).resolve()).as_posix()
     except (ValueError, OSError):
         return fallback
 
@@ -201,7 +201,7 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
     if only_file is not None:
         raw = [d for d in raw if _same_file(d.get("_src_uri", ""), only_file)]
     ws = deps.settings.workspace
-    if tmp_dir is not None:   # снипет: все диагностики под одной подписью '<snippet>'
+    if text is not None:      # снипет: все диагностики под одной подписью '<snippet>'
         items = [mapper.analyze_diagnostic_to_model(fallback, d) for d in raw]
     else:
         items = [mapper.analyze_diagnostic_to_model(_diag_label(ws, src_dir, d, fallback), d)

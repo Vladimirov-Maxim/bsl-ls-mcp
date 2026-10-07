@@ -29,7 +29,7 @@ def own_modules(changes: Iterable[tuple[str, str]]) -> frozenset[str]:
     """Общие модули, созданные задачей (новое описание общего модуля), — без учёта регистра."""
     out = set()
     for status, path in changes:
-        m = _OWN_COMMON_MODULE.match(path)
+        m = _OWN_COMMON_MODULE.search(path)
         if status == "A" and m:
             out.add((m.group(1) or m.group(2)).casefold())
     return frozenset(out)

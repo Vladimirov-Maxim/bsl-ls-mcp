@@ -269,8 +269,9 @@ def test_resolver_rejects_traversal_names():
     assert resolver.module_file_uri(WS, "Справочник.a/b/c") is None
 
 
-def test_diagnostics_path_confinement():
-    # path вне allowed_roots (в т.ч. UNC) отвергается ДО обращения к ФС
+def test_diagnostics_path_any_local():
+    # path — любой локальный каталог (код вне корпуса: внешние обработки, расширения);
+    # UNC отвергается ДО обращения к ФС, несуществующий путь — понятной ошибкой
     import asyncio
 
     from bsl_ls_mcp.application import tools as T
@@ -279,12 +280,15 @@ def test_diagnostics_path_confinement():
     base = get_settings()
     confined = Settings(**{**base.__dict__, "workspace": WS.resolve(),
                            "allowed_roots": (WS.resolve(),)})
+    seen = []
 
     class FakeAnalyzer:
         async def analyze(self, src_dir):
+            seen.append(src_dir)
             return []
 
     deps = T.Deps(lsp=None, analyzer=FakeAnalyzer(), settings=confined)
+    empty = {"diagnostics": [], "suppressed": {"total": 0, "by_code": []}}
 
     def must_raise(path):
         try:
@@ -293,12 +297,16 @@ def test_diagnostics_path_confinement():
             return
         raise AssertionError(f"ожидали ResolveError для path={path!r}")
 
-    must_raise(r"C:\Windows\System32")           # вне корня
     must_raise(r"\\attacker\share")              # UNC
-    must_raise(str(WS / ".." / ".." / "Windows"))  # обход через ..
-    # путь под корнем проходит конфайнмент
-    r = asyncio.run(T.bsl_diagnostics(deps, path=str(WS)))
-    assert r == {"diagnostics": [], "suppressed": {"total": 0, "by_code": []}}
+    must_raise("//attacker/share")
+    must_raise(str(WS / "нет-такого-каталога"))
+    assert seen == []                             # до analyze не дошло
+
+    # вне workspace и BSL_ALLOWED_ROOTS — допустимо
+    outside = WS.resolve().parent
+    assert asyncio.run(T.bsl_diagnostics(deps, path=str(outside))) == empty
+    assert asyncio.run(T.bsl_diagnostics(deps, path=str(WS))) == empty
+    assert seen == [outside, WS]
 
 
 # ---------- готовность индекса (_watch_ready): строгий сигнал + предохранитель ----------

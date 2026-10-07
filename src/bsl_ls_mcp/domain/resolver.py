@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from . import source_layout
@@ -58,6 +59,32 @@ def is_local_path(path: Path) -> bool:
     return not str(rp).startswith(("\\\\", "//"))
 
 
+def layout_of(workspace: Path) -> str:
+    """Формат исходников по корню (source_layout). Без корневого файла (часть
+    выгрузки, фикстуры) — по первому общему модулю; без признаков — конфигуратор."""
+    return _layout_cached(str(workspace))
+
+
+@lru_cache(maxsize=32)
+def _layout_cached(root_str: str) -> str:
+    root = Path(root_str)
+    for layout, marker in source_layout.ROOT_MARKERS.items():
+        if root.joinpath(*marker).is_file():
+            return layout
+    common = root / "CommonModules"
+    if common.is_dir():
+        for d in common.iterdir():
+            if (d / "Ext").is_dir():
+                return source_layout.DESIGNER
+            if (d / "Module.bsl").is_file():
+                return source_layout.EDT
+    return source_layout.DESIGNER
+
+
+def _own_dir(workspace: Path, base: Path) -> Path:
+    return base.joinpath(*source_layout.own_parts(layout_of(workspace)))
+
+
 @dataclass(frozen=True)
 class Position:
     uri: str
@@ -78,9 +105,8 @@ def _candidate_files(workspace: Path, type_en: str, module: str) -> list[Path]:
     directory = _TYPE_EN_TO_DIR.get(type_en)
     if directory is None or not valid_segment(module):
         return []
-    layout = source_layout.detect(workspace)
-    own = source_layout.own_dir(layout, workspace / directory / module)
-    return [own / rel for rel in source_layout.module_names(layout, type_en)]
+    own = _own_dir(workspace, workspace / directory / module)
+    return [own / rel for rel in source_layout.module_names(layout_of(workspace), type_en)]
 
 
 def candidate_uris(workspace: Path, type_ru: str, module: str) -> list[str]:
@@ -139,12 +165,12 @@ def diagnostics_target(workspace: Path, full_name: str) -> DiagnosticsTarget | N
     base = _object_base(workspace, parts[0], parts[1])
     if base is None:
         return None
-    layout = source_layout.detect(workspace)
+    layout = layout_of(workspace)
     if len(parts) >= 4 and valid_segment(parts[3]) and parts[2] in _FORM_MARK | _CMD_MARK:
-        d = (source_layout.form_dir(layout, base, parts[3]) if parts[2] in _FORM_MARK
-             else source_layout.command_dir(layout, base, parts[3]))
+        d = base.joinpath(*(source_layout.form_parts(layout, parts[3]) if parts[2] in _FORM_MARK
+                            else source_layout.command_parts(layout, parts[3])))
         return DiagnosticsTarget(d) if d.exists() else None
-    own = source_layout.own_dir(layout, base)
+    own = _own_dir(workspace, base)
     if not own.exists():
         return None
     if layout == source_layout.DESIGNER:
@@ -160,15 +186,15 @@ def diagnostics_src_dir(workspace: Path, full_name: str) -> Path | None:
 
 
 def _form_module(workspace: Path, base: Path, form: str) -> Path:
-    return source_layout.form_dir(source_layout.detect(workspace), base, form) / "Module.bsl"
+    return base.joinpath(*source_layout.form_parts(layout_of(workspace), form), "Module.bsl")
 
 
 def _command_module(workspace: Path, base: Path, command: str) -> Path:
-    return source_layout.command_dir(source_layout.detect(workspace), base, command) / "CommandModule.bsl"
+    return base.joinpath(*source_layout.command_parts(layout_of(workspace), command), "CommandModule.bsl")
 
 
 def _kind_module(workspace: Path, base: Path, kind: str) -> Path:
-    return source_layout.own_dir(source_layout.detect(workspace), base) / _KIND_FILE[kind]
+    return _own_dir(workspace, base) / _KIND_FILE[kind]
 
 
 def symbol_candidates(workspace: Path, full_name: str) -> tuple[list[str], str]:
