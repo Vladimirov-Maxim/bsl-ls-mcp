@@ -1,5 +1,7 @@
-"""Путь модуля в выгрузке ↔ имя 1С. Формат выгрузки конфигуратора (Designer):
-`<Вид>/<Объект>/Ext/<Модуль>.bsl`, формы — `…/Forms/<Форма>/Ext/Form/Module.bsl`."""
+"""Путь модуля в исходниках ↔ имя 1С. Оба формата: выгрузка конфигуратора
+(`<Вид>/<Объект>/Ext/<Модуль>.bsl`, формы — `…/Forms/<Форма>/Ext/Form/Module.bsl`) и
+проект EDT (`<Вид>/<Объект>/<Модуль>.bsl`, формы — `…/Forms/<Форма>/Module.bsl`).
+Путь может начинаться с префикса до корня конфигурации (`BF/src/…` в репозитории EDT)."""
 from __future__ import annotations
 
 from ..one_c_config_path import _OBJECT_TYPE_MAP
@@ -14,23 +16,32 @@ _MODULE_KIND_RU = {
 }
 
 
+def common_module_paths(name: str, prefixes: tuple[str, ...] = ("",)) -> list[str]:
+    """Возможные пути модуля общего модуля: под каждым корнем конфигурации, в обоих
+    форматах (сначала конфигуратор, затем EDT). Префикс — '' или 'BF/src/'."""
+    return [f"{p}CommonModules/{name}/{tail}" for p in prefixes for tail in ("Ext/Module.bsl", "Module.bsl")]
+
+
 def common_module_path(name: str) -> str:
-    """Модуль общего модуля по имени."""
-    return f"CommonModules/{name}/Ext/Module.bsl"
+    """Модуль общего модуля по имени в выгрузке конфигуратора (совместимость)."""
+    return common_module_paths(name)[0]
 
 
 def module_label(path: str) -> str:
-    """'Documents/Заказ/Ext/ObjectModule.bsl' → 'Документ.Заказ.МодульОбъекта'.
-    Нераспознанный путь (внешняя обработка, глобальный модуль) — сам путь."""
-    parts = path.split("/")
-    type_en = _OBJECT_TYPE_MAP.get(parts[0]) if parts else None
-    type_ru = type_en_to_ru(type_en) if type_en else None
+    """'Documents/Заказ/Ext/ObjectModule.bsl' → 'Документ.Заказ.МодульОбъекта'
+    (так же 'BF/src/Documents/Заказ/ObjectModule.bsl'). Нераспознанный путь
+    (внешняя обработка, глобальный модуль) — сам путь."""
+    all_parts = path.split("/")
+    start = next((i for i, part in enumerate(all_parts) if part in _OBJECT_TYPE_MAP), None)
+    if start is None:
+        return path
+    parts = all_parts[start:]
+    type_en = _OBJECT_TYPE_MAP[parts[0]]
+    type_ru = type_en_to_ru(type_en)
     if type_ru is None or len(parts) < 3:
         return path
     name = parts[1]
-    if type_en == "CommonModule":
-        return f"{type_ru}.{name}"
-    if type_en == "CommonForm":
+    if type_en in ("CommonModule", "CommonForm"):
         return f"{type_ru}.{name}"
     if len(parts) >= 4 and parts[2] == "Forms":
         return f"{type_ru}.{name}.Форма.{parts[3]}"

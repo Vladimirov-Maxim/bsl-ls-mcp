@@ -77,9 +77,9 @@ Write-Host "[build] assembling bundle layout..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force (Join-Path $bundle "server") | Out-Null
 # Vendor jar (BSL Language Server, LGPL-3.0) is NOT committed to this repo - it is
 # downloaded from the upstream release on first build and cached in server\ for reuse.
-$jarVer = "0.29.0"
-# Pinned SHA256 of bsl-language-server-0.29.0-exec.jar (upstream GitHub release).
-$jarSha256 = "D6FA9AD638BA51855E260B88AD1F8CE4E602385845A4EE43600D148F779BCF0B"
+$jarVer = "1.0.7"
+# Pinned SHA256 of bsl-language-server-1.0.7-exec.jar (upstream GitHub release).
+$jarSha256 = "9F62765EDD344D66456DA24C906EAF623A03C56E90E5AAFEE466200100909F64"
 $srcJar = "server\bsl-language-server-$jarVer-exec.jar"
 if ((-not (Test-Path $srcJar)) -or ((Get-Item $srcJar).Length -lt 1MB)) {
   Write-Host "[build] downloading BSL Language Server $jarVer (upstream release)..." -ForegroundColor Cyan

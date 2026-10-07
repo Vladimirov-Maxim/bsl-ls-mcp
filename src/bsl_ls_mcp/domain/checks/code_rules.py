@@ -32,7 +32,7 @@ class Hit:
 
 @dataclass
 class FileContext:
-    path: str                                   # путь от корня выгрузки, прямые косые
+    path: str                                   # путь от корня источника правок, прямые косые
     model: ModuleModel
     mask: frozenset[int]                        # строки новой версии, добавленные/изменённые задачей
     knowledge: Knowledge
@@ -367,7 +367,7 @@ def _foreign_internal_api(ctx: FileContext) -> Iterator[Hit]:
     """Метод из области СлужебныйПрограммныйИнтерфейс чужого общего модуля вызывать
     нельзя: служебный интерфейс меняется без предупреждения. «Свои» — модуль этого же
     файла, общие модули, созданные задачей, и модули с префиксом доработок проекта."""
-    own_self = re.match(r"^CommonModules/([^/]+)/", ctx.path, re.IGNORECASE)
+    own_self = re.search(r"(?:^|/)CommonModules/([^/]+)/", ctx.path, re.IGNORECASE)
     self_name = own_self.group(1).casefold() if own_self else ""
     region = ctx.knowledge.internal_api_region.casefold()
     seen: set[tuple] = set()

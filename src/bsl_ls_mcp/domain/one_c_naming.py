@@ -48,6 +48,11 @@ _EN_TO_RU: dict[str, str] = {
     "SessionParameter": "ПараметрСеанса",
     "StyleItem": "ЭлементСтиля",
     "XDTOPackage": "ПакетXDTO",
+    "Sequence": "Последовательность",
+    "DocumentNumerator": "НумераторДокументов",
+    "ExternalDataSource": "ВнешнийИсточникДанных",
+    "IntegrationService": "СервисИнтеграции",
+    "WSReference": "WSСсылка",
 }
 
 # EN→RU обратный для перевода русского имени типа обратно в канон.

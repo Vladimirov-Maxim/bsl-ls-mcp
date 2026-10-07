@@ -90,6 +90,26 @@ def _diag_label(workspace: Path, src_dir: Path, d: dict, fallback: str) -> str:
         return fallback
 
 
+def _uri_key(uri: str) -> str:
+    try:
+        return str(mapper.uri_to_path(uri).resolve()).casefold()
+    except (ValueError, OSError):
+        return uri
+
+
+def _mirror(workspace: Path, files: tuple[Path, ...], tmp_dir: Path) -> dict[str, str]:
+    """Копии файлов в tmp_dir с путём от корня workspace; ключ — копия, значение — URI
+    исходного файла (для подписи диагностики)."""
+    out: dict[str, str] = {}
+    for f in files:
+        rel = f.relative_to(workspace)
+        dst = tmp_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, dst)
+        out[str(dst.resolve()).casefold()] = f.resolve().as_uri()
+    return out
+
+
 async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
                           path: str | None = None, text: str | None = None,
                           min_severity: str | None = None,
@@ -99,8 +119,9 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
     Ровно ОДИН из адресов:
       module_full_name — модуль ПРОИНДЕКСИРОВАННОГО корпуса, напр. 'ОбщийМодуль.МойМодуль'
                          или 'Справочник.X.Форма.Имя' (резолв по дереву workspace);
-      path             — ПРОИЗВОЛЬНЫЙ каталог или .bsl-файл ВНЕ корпуса (внешние
-                         обработки/отчёты, напр. 'C:\\1c\\work\\<задача>\\Реализация');
+      path             — ПРОИЗВОЛЬНЫЙ локальный каталог или .bsl-файл, в т.ч. вне
+                         корпуса (внешние обработки/отчёты, расширения, напр.
+                         'C:\\1c\\work\\<задача>\\Реализация'); UNC-пути запрещены;
       text             — СТРОКА кода 1С (снипет): пишем во временный .bsl и линтуем.
                          Обёртка в процедуру НЕ обязательна — блок операторов линтуется
                          как есть; нужна лишь синтаксическая ЗАВЕРШЁННОСТЬ (все Если/Цикл
@@ -137,19 +158,17 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
 
     only_file: Path | None = None
     tmp_dir: Path | None = None
+    mirror: dict[str, str] = {}
     if text is not None:
         tmp_dir = Path(tempfile.mkdtemp(prefix="bsl_snip_"))
         (tmp_dir / "snippet.bsl").write_text(text, encoding="utf-8")
         src_dir, fallback = tmp_dir, "<snippet>"
     elif path is not None:
         p = Path(path)
-        # Конфайнмент: путь обязан лежать под workspace или одним из BSL_ALLOWED_ROOTS.
-        # Иначе path-режим — оракул ФС (перебор каталогов), утечка содержимого чужих
-        # файлов и, для UNC, исходящий SMB с утечкой NTLM-хэша сервисного аккаунта.
-        if not resolver.within_roots(p, deps.settings.allowed_roots):
-            raise ResolveError(
-                f"путь вне разрешённых корней: {path!r}. Разрешены workspace и "
-                f"BSL_ALLOWED_ROOTS; UNC-пути (\\\\host\\share) запрещены.")
+        # Любой локальный путь: диагностики нужны и коду вне корпуса (внешние обработки,
+        # расширения). UNC запрещён — исходящий SMB уводит NTLM-хэш сервисного аккаунта.
+        if not resolver.is_local_path(p):
+            raise ResolveError(f"UNC-пути (\\\\host\\share) запрещены: {path!r}")
         if not p.exists():
             raise ResolveError(f"путь не найден: {path!r}")
         src_dir = p if p.is_dir() else p.parent
@@ -158,14 +177,24 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
     else:
         if module_full_name.count(".") < 1:
             raise ResolveError("ожидался формат Тип.Модуль, напр. 'ОбщийМодуль.МойМодуль'")
-        src_dir = resolver.diagnostics_src_dir(deps.settings.workspace, module_full_name)
-        if src_dir is None:
+        target = resolver.diagnostics_target(deps.settings.workspace, module_full_name)
+        if target is None:
             raise ResolveError(f"не найден каталог модуля {module_full_name!r}")
-        fallback = module_full_name
+        src_dir, fallback = target.src_dir, module_full_name
+        if target.files is not None:
+            # Объект EDT: модули лежат рядом с Forms/ и Commands/ — отдаём analyze только
+            # их, копией с тем же путём от корня, и возвращаем подписи к исходным файлам.
+            tmp_dir = Path(tempfile.mkdtemp(prefix="bsl_obj_"))
+            mirror = _mirror(deps.settings.workspace, target.files, tmp_dir)
+            src_dir = tmp_dir
 
     # Проверка кода — через analyze-CLI (разовый java, без тёплого индекса).
     try:
         raw = await deps.analyzer.analyze(src_dir)
+        if mirror:   # пока копии на месте: resolve() несуществующего пути не раскрыл бы 8.3-имена
+            raw = [{**d, "_src_uri": mirror.get(_uri_key(d.get("_src_uri", "")), d.get("_src_uri", ""))}
+                   for d in raw]
+            src_dir = target.src_dir
     finally:
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)

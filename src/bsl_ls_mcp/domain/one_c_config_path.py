@@ -1,4 +1,5 @@
-"""Разбор пути файла внутри CR-выгрузки 1С-конфигурации.
+"""Разбор пути файла внутри исходников 1С-конфигурации — выгрузки конфигуратора или
+проекта EDT (каталоги видов и имена модулей у них общие, см. source_layout).
 
 Разбор путей 1С — pure, без IO. Даёт path→(object_type EN,
 object_name, module_kind) и карту каталог↔тип — используется resolver/mapper.
@@ -60,6 +61,11 @@ _OBJECT_TYPE_MAP: dict[str, str] = {
     "SessionParameters": "SessionParameter",
     "StyleItems": "StyleItem",
     "XDTOPackages": "XDTOPackage",
+    "Sequences": "Sequence",
+    "DocumentNumerators": "DocumentNumerator",
+    "ExternalDataSources": "ExternalDataSource",
+    "IntegrationServices": "IntegrationService",
+    "WSReferences": "WSReference",
 }
 
 # Имя bsl-файла → module_kind. (Forms/<form>/ обрабатывается отдельно как FormModule.)
@@ -73,7 +79,7 @@ _MODULE_KIND_BY_FILENAME: dict[str, str] = {
     "Template.bsl": "Template",
 }
 
-# Глобальные модули приложения лежат прямо в ``Ext/`` (без родительского объекта).
+# Глобальные модули приложения: ``Ext/`` (конфигуратор) или ``Configuration/`` (EDT).
 _GLOBAL_APPLICATION_MODULE_KIND: dict[str, str] = {
     "ManagedApplicationModule.bsl": "ManagedApplicationModule",
     "OrdinaryApplicationModule.bsl": "OrdinaryApplicationModule",
@@ -86,7 +92,7 @@ _TYPE_EN_TO_DIR: dict[str, str] = {en: d for d, en in _OBJECT_TYPE_MAP.items()}
 
 
 class OneCConfigPathParser:
-    """Stateless: разбирает путь файла относительно корня CR-выгрузки."""
+    """Stateless: разбирает путь файла относительно корня исходников (любой формат)."""
 
     def parse(self, *, root: Path, file_path: Path) -> OneCConfigContext:
         rel = PurePath(file_path).relative_to(PurePath(root))
@@ -97,7 +103,7 @@ class OneCConfigPathParser:
             return OneCConfigContext(source_relative_path=rel_posix)
 
         if (
-            parts[0] == "Ext"
+            parts[0] in ("Ext", "Configuration")
             and len(parts) == 2
             and rel.name in _GLOBAL_APPLICATION_MODULE_KIND
         ):
@@ -122,7 +128,8 @@ class OneCConfigPathParser:
         if suffix == ".bsl":
             if form_name is not None:
                 module_kind = "FormModule"
-            elif object_type == "CommonForm" and "Form" in parts:
+            elif object_type == "CommonForm":
+                # конфигуратор: CommonForms/X/Ext/Form/Module.bsl; EDT: CommonForms/X/Module.bsl
                 module_kind = "FormModule"
             else:
                 module_kind = _MODULE_KIND_BY_FILENAME.get(rel.name)

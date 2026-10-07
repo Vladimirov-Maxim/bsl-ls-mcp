@@ -98,8 +98,9 @@ def _reindex(s, host: str, port: int) -> None:
 
 def _first_common_module(workspace) -> str | None:
     from pathlib import Path
-    for p in Path(workspace).glob("CommonModules/*/Ext/Module.bsl"):
-        return f"ОбщийМодуль.{p.parents[1].name}"  # CommonModules/<name>/Ext/Module.bsl
+    for pattern in ("CommonModules/*/Ext/Module.bsl", "CommonModules/*/Module.bsl"):  # конфигуратор | EDT
+        for p in Path(workspace).glob(pattern):
+            return f"ОбщийМодуль.{p.relative_to(workspace).parts[1]}"
     return None
 
 

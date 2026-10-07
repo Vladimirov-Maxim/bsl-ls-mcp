@@ -1,6 +1,15 @@
 """Источник правок — git: база ↔ рабочая копия (вместе с новыми неотслеживаемыми
 файлами) или база ↔ ревизия.
 
+Репозиторий — выгрузка конфигуратора (Configuration.xml в корне) или проект EDT, где
+конфигурация лежит глубже (`BF/src/Configuration/Configuration.mdo`): пути правок
+остаются от корня репозитория, а префиксы корней конфигурации даются проверкам, чтобы
+найти соседний общий модуль.
+
+База по умолчанию — точка ответвления от ветки разработки (`develop`, BSL_BASE_BRANCH):
+задача живёт в своей ветке, и её правки — всё, что сделано после ответвления, а не
+после последнего коммита. Нет такой ветки — `HEAD`, как раньше.
+
 Безопасность. Служба работает от LocalSystem, репозиторий принадлежит пользователю:
 git откажет («dubious ownership»), поэтому путь репозитория явно помечается
 `safe.directory` для этого вызова. Конфиг репозитория умеет запускать команды —
@@ -25,32 +34,67 @@ def _decode(data: bytes) -> str:
     return data.decode("utf-8-sig", errors="replace")
 
 
-def detect_unload_format(root: Path) -> None:
-    """Выгрузка конфигуратора — поддерживается; EDT — нет (понятная ошибка, а не тишина)."""
-    if (root / "Configuration.xml").exists():
-        return
-    if (root / "Configuration" / "Configuration.mdo").exists() or (root / "src" / "Configuration").exists():
-        raise SourceError(f"{root}: формат EDT пока не поддерживается — нужна выгрузка конфигуратора "
-                          "(Configuration.xml в корне)")
+# Глубже не ищем: в проекте EDT корень конфигурации — `<Проект>/src/`.
+_CONFIG_SEARCH_DEPTH = 3
+
+
+def config_prefixes(root: Path) -> tuple[str, ...]:
+    """Префиксы корней конфигурации от корня репозитория: '' для выгрузки в корне,
+    'BF/src/' для проекта EDT. Не найдено ни одного — ('',), как раньше."""
+    found: list[str] = []
+
+    def walk(d: Path, rel: str, depth: int) -> None:
+        if (d / "Configuration.xml").is_file() or (d / "Configuration" / "Configuration.mdo").is_file():
+            found.append(rel)
+            return
+        if depth >= _CONFIG_SEARCH_DEPTH:
+            return
+        try:
+            subdirs = sorted(p for p in d.iterdir() if p.is_dir() and not p.name.startswith("."))
+        except OSError:
+            return
+        for sub in subdirs:
+            walk(sub, f"{rel}{sub.name}/", depth + 1)
+
+    walk(root, "", 0)
+    return tuple(found) or ("",)
 
 
 class GitChangeSource:
     mode = "git"
 
-    def __init__(self, repo: str | Path, base: str = "HEAD", rev: str | None = None, *,
-                 git: str = "git", timeout: float = 120) -> None:
+    def __init__(self, repo: str | Path, base: str | None = None, rev: str | None = None, *,
+                 git: str = "git", timeout: float = 120, base_branch: str = "develop") -> None:
         self.repo = Path(repo).resolve()
         if not (self.repo / ".git").exists():
             raise SourceError(f"не git-репозиторий: {self.repo}")
-        detect_unload_format(self.repo)
-        self.base = base
+        self.config_prefixes = config_prefixes(self.repo)
         self.rev = rev or None
         self._git_exe = git
         self._timeout = timeout
         self._changes: list[Change] | None = None
-        for ref in (self.base, self.rev):
-            if ref and self._git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) is None:
-                raise SourceError(f"в репозитории {self.repo} нет ревизии «{ref}»")
+        if self.rev and not self._has_commit(self.rev):
+            raise SourceError(f"в репозитории {self.repo} нет ревизии «{self.rev}»")
+        if base:
+            if not self._has_commit(base):
+                raise SourceError(f"в репозитории {self.repo} нет ревизии «{base}»")
+            self.base, how = base, "задана"
+        else:
+            self.base, how = self._auto_base(base_branch)
+        self.base_info = {"ревизия": self.base, "как": how}
+
+    def _has_commit(self, ref: str) -> bool:
+        return self._git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) is not None
+
+    def _auto_base(self, branch: str) -> tuple[str, str]:
+        """Точка ответвления от `branch` (локальной или origin/), иначе HEAD."""
+        for ref in (branch, f"origin/{branch}") if branch else ():
+            if not self._has_commit(ref):
+                continue
+            mb = self._git("merge-base", ref, self.rev or "HEAD", check=False)
+            if mb and mb.strip():
+                return mb.strip(), f"merge-base с {ref}"
+        return "HEAD", "HEAD (ветки разработки нет)"
 
     def _git(self, *args: str, check: bool = True) -> str | None:
         cmd = [self._git_exe, "-C", str(self.repo),

@@ -32,7 +32,7 @@ foreach ($c in @((Join-Path $root "dist\bsl-ls-mcp"), $root)) {
 }
 if (-not $bundle) { Write-Host "bsl-ls-mcp.exe not found (build first: build.ps1)" -ForegroundColor Red; exit 1 }
 $exe = Join-Path $bundle "bsl-ls-mcp.exe"
-$jar = Join-Path $bundle "server\bsl-language-server-0.29.0-exec.jar"
+$jar = Join-Path $bundle "server\bsl-language-server-1.0.7-exec.jar"
 $jre = Join-Path $bundle "jre\bin\java.exe"
 # Bundled JRE preferred (self-contained). Иначе — АБСОЛЮТНЫЙ путь системной java, а не
 # просто "java": служба бежит от LocalSystem, чей PATH может не содержать java.

@@ -12,6 +12,10 @@ from functools import lru_cache
 from pathlib import Path
 
 
+# Версия BSL Language Server, под которую собрана обёртка (jar в server/, build.ps1).
+BSL_LS_VERSION = "1.0.7"
+
+
 @dataclass(frozen=True)
 class Settings:
     # --- источник и пути ---
@@ -60,6 +64,8 @@ class Settings:
     # --- проверки кода задачи по правилам проекта (bsl_rules_check) ---
     rules_path: Path | None = None  # реестр правил проекта по умолчанию (BSL_RULES); внешний файл
     git_path: str = "git"           # git для источника правок (BSL_GIT); служба: полный путь надёжнее
+    base_branch: str = "develop"    # база правок по умолчанию — merge-base с этой веткой (BSL_BASE_BRANCH);
+                                    # пусто или ветки нет — HEAD
 
     @staticmethod
     def from_env() -> "Settings":
@@ -69,13 +75,13 @@ class Settings:
             base = Path(sys.executable).resolve().parent
         else:
             base = Path(__file__).resolve().parents[2]  # .../bsl-ls-mcp
-        default_jar = base / "server" / "bsl-language-server-0.29.0-exec.jar"
+        default_jar = base / "server" / f"bsl-language-server-{BSL_LS_VERSION}-exec.jar"
         cfg = os.environ.get("BSL_CONFIG")
         log = os.environ.get("BSL_SERVER_LOG")
         # Статус-файл в ProgramData — единый путь для службы (LocalSystem) и трея (юзер).
         status = os.environ.get("BSL_STATUS_FILE") or str(
             Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "bsl-ls-mcp" / "status.json")
-        ws = Path(os.environ.get("BSL_WORKSPACE", r"C:\1c\src\cf"))
+        ws = Path(os.environ.get("BSL_WORKSPACE", r"C:\1c\src\cf"))  # выгрузка или <проект EDT>\src
         # Доп. корни для path-режима (внешние обработки и т.п.) — через ; (Windows).
         extra_roots = [Path(p.strip()) for p in os.environ.get("BSL_ALLOWED_ROOTS", "").split(";")
                        if p.strip()]
@@ -104,6 +110,7 @@ class Settings:
             diagnostics_wait_sec=float(os.environ.get("BSL_DIAGNOSTICS_WAIT", "120")),
             rules_path=Path(os.environ["BSL_RULES"]) if os.environ.get("BSL_RULES") else None,
             git_path=os.environ.get("BSL_GIT", "git"),
+            base_branch=os.environ.get("BSL_BASE_BRANCH", "develop"),
         )
 
 
