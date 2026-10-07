@@ -5,9 +5,9 @@ rem Sits at the bundle root next to the exe, server\ and (optional) jre\.
 rem Args pass through:  run.cmd --selftest   /   run.cmd --transport sse ...
 rem ASCII-only on purpose: cmd.exe mis-parses non-ASCII .cmd files.
 
-set "BSL_LS_JAR=%~dp0server\bsl-language-server-0.29.0-exec.jar"
+set "BSL_LS_JAR=%~dp0server\bsl-language-server-1.0.7-exec.jar"
 
-rem Java: bundled JRE if present (target machine without Java), else system java (need 17+).
+rem Java: bundled JRE if present (target machine without Java), else system java (need 21+).
 if exist "%~dp0jre\bin\java.exe" (
   set "BSL_JAVA=%~dp0jre\bin\java.exe"
 ) else (

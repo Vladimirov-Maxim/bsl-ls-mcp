@@ -21,6 +21,7 @@ def _read(path: Path) -> str:
 
 class DirPairChangeSource:
     mode = "каталоги"
+    config_prefixes = ("",)
 
     def __init__(self, baseline: str | Path, target: str | Path) -> None:
         self.baseline = Path(baseline).resolve()

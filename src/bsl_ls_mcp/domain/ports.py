@@ -28,6 +28,7 @@ class ChangeSource(Protocol):
     или пара каталогов эталон ↔ копия. Только чтение."""
 
     mode: str      # "git" | "каталоги"
+    config_prefixes: tuple[str, ...]   # корни конфигурации от корня источника: '' или 'BF/src/'
 
     def changes(self) -> list[Change]:
         """Состав правок: добавленные, изменённые, удалённые файлы."""

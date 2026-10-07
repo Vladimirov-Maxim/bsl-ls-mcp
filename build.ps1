@@ -35,10 +35,14 @@ Write-Host "[build] PyInstaller install..." -ForegroundColor Cyan
 # PIN the version, not --upgrade: a past --upgrade left TWO dist-info dirs (6.21 + 6.22)
 # in one site-packages -> importlib.metadata.version('pyinstaller')=None -> the pywintypes
 # hook crashed on 'Version(None)'. Pin a known-good version.
-py -3 -m pip install --quiet "pyinstaller==6.22.2" 2>&1 | Out-Null
+# Python for the build: active virtualenv (VIRTUAL_ENV) if any - the bundle collects mcp from it;
+# else the system "py -3" (then mcp must be installed there: pip install -e .).
+$py = if ($env:VIRTUAL_ENV -and (Test-Path "$env:VIRTUAL_ENV\Scripts\python.exe")) { "$env:VIRTUAL_ENV\Scripts\python.exe" } else { "py" }
+$pyArgs = if ($py -eq "py") { @("-3") } else { @() }
+& $py @pyArgs -m pip install --quiet "pyinstaller==6.22.2" 2>&1 | Out-Null
 
 Write-Host "[build] running PyInstaller (onedir)..." -ForegroundColor Cyan
-py -3 -m PyInstaller --noconfirm --clean `
+& $py @pyArgs -m PyInstaller --noconfirm --clean `
   --onedir --name bsl-ls-mcp `
   --paths src `
   --collect-submodules mcp.server `
@@ -77,9 +81,9 @@ Write-Host "[build] assembling bundle layout..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Force (Join-Path $bundle "server") | Out-Null
 # Vendor jar (BSL Language Server, LGPL-3.0) is NOT committed to this repo - it is
 # downloaded from the upstream release on first build and cached in server\ for reuse.
-$jarVer = "0.29.0"
-# Pinned SHA256 of bsl-language-server-0.29.0-exec.jar (upstream GitHub release).
-$jarSha256 = "D6FA9AD638BA51855E260B88AD1F8CE4E602385845A4EE43600D148F779BCF0B"
+$jarVer = "1.0.7"
+# Pinned SHA256 of bsl-language-server-1.0.7-exec.jar (upstream GitHub release).
+$jarSha256 = "9F62765EDD344D66456DA24C906EAF623A03C56E90E5AAFEE466200100909F64"
 $srcJar = "server\bsl-language-server-$jarVer-exec.jar"
 if ((-not (Test-Path $srcJar)) -or ((Get-Item $srcJar).Length -lt 1MB)) {
   Write-Host "[build] downloading BSL Language Server $jarVer (upstream release)..." -ForegroundColor Cyan

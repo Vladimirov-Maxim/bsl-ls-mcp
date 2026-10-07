@@ -20,10 +20,12 @@ MCP-обёртка над [BSL Language Server](https://github.com/1c-syntax/bsl
 
 ## Что нужно
 
-- Рабочая копия исходников 1С в формате CR-выгрузки (каталог `src/cf`).
+- Рабочая копия исходников 1С: выгрузка конфигуратора (каталог с `Configuration.xml`) или
+  проект EDT (каталог `<проект>\src` с `Configuration\Configuration.mdo`) — формат
+  определяется сам.
 - ~14 ГБ свободной RAM — для навигации (граф держится в памяти). Диагностикам индекс
   не нужен, им хватает ~2 ГБ на разовый вызов.
-- Java 17+ или готовый бандл с portable JRE (Python/Java ставить не надо).
+- Java 21+ (BSL LS 1.0.x) или готовый бандл с portable JRE (Python/Java ставить не надо).
 
 ## Запуск
 
@@ -46,11 +48,12 @@ run.cmd
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-service.ps1 -Workspace "C:\1c\src\cf"
 ```
-Код вне корпуса (внешние обработки) — добавьте `-AllowedRoots "C:\1c\work"`.
+Для проекта EDT: `-Workspace "C:\Projects\git\bf_edt\BF\src"`. Набор диагностик
+фиксируется конфигом BSL LS: `-Config "<путь>\.bsl-language-server.json"`.
 Управление — штатными средствами Windows (`Restart-Service bsl-ls-mcp`), полный реиндекс —
 MCP-инструментом `bsl_reindex`. Состояние индекса — `%ProgramData%\bsl-ls-mcp\status.json`.
 
-### Вариант 2. С исходников (нужны Python 3.10+ и Java 17+)
+### Вариант 2. С исходников (нужны Python 3.10+ и Java 21+)
 
 ```powershell
 py -3 -m pip install -e .
@@ -70,7 +73,8 @@ bsl-ls-mcp --transport streamable-http --port 8081     # → http://127.0.0.1:80
 > **Безопасность.** Демон не аутентифицирует вызовы и по умолчанию слушает только
 > `127.0.0.1`. Не выставляйте порт в сеть без обратного прокси с авторизацией
 > (`BSL_MCP_HOST=0.0.0.0` заблокирован без `BSL_ALLOW_REMOTE=1`). `path`-режим
-> ограничен `BSL_WORKSPACE` и `BSL_ALLOWED_ROOTS`. Подробнее — [SECURITY.md](SECURITY.md).
+> `bsl_diagnostics(path)` принимает любой локальный путь (UNC запрещён); пути проверок правок
+> задачи ограничены `BSL_WORKSPACE` и `BSL_ALLOWED_ROOTS`. Подробнее — [SECURITY.md](SECURITY.md).
 
 ## Как устроено имя объекта
 
@@ -113,7 +117,7 @@ bsl-ls-mcp --transport streamable-http --port 8081     # → http://127.0.0.1:80
   ```
   bsl_diagnostics(module_full_name="ОбщийМодуль.МойМодуль")        # модуль корпуса
   bsl_diagnostics(path=r"C:\1c\work\<задача>\Реализация")          # внешняя обработка
-  bsl_diagnostics(path=r"...\Ext\ObjectModule.bsl")                # один файл
+  bsl_diagnostics(path=r"...\ObjectModule.bsl")                    # один файл
   ```
 - **`bsl_callers` / `bsl_callees`** → список `{name, type, full_name, kind}` —
   `full_name` можно сразу подать в другой инструмент.

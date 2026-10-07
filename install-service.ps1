@@ -6,14 +6,22 @@
 #
 # MUST run elevated (Administrator).
 #   powershell -ExecutionPolicy Bypass -File install-service.ps1 -Workspace "E:\1c\src\cf"
+#   EDT project: -Workspace "C:\Projects\git\bf_edt\BF\src" (the folder with Configuration\)
 param(
   [string]$ServiceName = "bsl-ls-mcp",
   [string]$Workspace   = "C:\1c\src\cf",
   [int]   $Port        = 8081,
   [string]$Xmx         = "14g",
-  # Доп. корни для path-режима bsl_diagnostics (внешние обработки вне корпуса), через ';'.
-  # Без этого код вне BSL_WORKSPACE отвергается конфайнментом. Напр. -AllowedRoots "D:\work".
+  # Extra roots (';'-separated) for repo/baseline/target/rules of bsl_rules_check and
+  # bsl_task_methods. bsl_diagnostics(path) accepts any local path and does not need it.
   [string]$AllowedRoots = "",
+  # BSL LS configuration (.bsl-language-server.json): fixes the active diagnostics set.
+  # Empty = BSL LS defaults (part of the diagnostics is off).
+  [string]$Config = "",
+  # Default base of task changes: merge-base with this branch (empty/absent = HEAD).
+  [string]$BaseBranch = "develop",
+  # Default project rules registry for bsl_rules_check (BSL_RULES), optional.
+  [string]$Rules = "",
   # Учётка службы. Пусто = LocalSystem (полные права). Для снижения привилегий задайте
   # низкоправную учётку, напр. -ServiceAccount "NT SERVICE\bsl-ls-mcp" (виртуальный
   # аккаунт службы) или доменную сервисную учётку с -ServiceAccountPassword.
@@ -32,7 +40,7 @@ foreach ($c in @((Join-Path $root "dist\bsl-ls-mcp"), $root)) {
 }
 if (-not $bundle) { Write-Host "bsl-ls-mcp.exe not found (build first: build.ps1)" -ForegroundColor Red; exit 1 }
 $exe = Join-Path $bundle "bsl-ls-mcp.exe"
-$jar = Join-Path $bundle "server\bsl-language-server-0.29.0-exec.jar"
+$jar = Join-Path $bundle "server\bsl-language-server-1.0.7-exec.jar"
 $jre = Join-Path $bundle "jre\bin\java.exe"
 # Bundled JRE preferred (self-contained). Иначе — АБСОЛЮТНЫЙ путь системной java, а не
 # просто "java": служба бежит от LocalSystem, чей PATH может не содержать java.
@@ -118,6 +126,11 @@ if ($ServiceAccount) {
 $envs = @("BSL_WORKSPACE=$Workspace", "BSL_XMX=$Xmx", "BSL_LS_JAR=$jar", "BSL_JAVA=$java",
           "BSL_MCP_HOST=127.0.0.1", "BSL_MCP_PORT=$Port")
 if ($AllowedRoots) { $envs += "BSL_ALLOWED_ROOTS=$AllowedRoots" }
+if ($Config)       { $envs += "BSL_CONFIG=$Config" }
+if ($Rules)        { $envs += "BSL_RULES=$Rules" }
+$envs += "BSL_BASE_BRANCH=$BaseBranch"
+$gitExe = (Get-Command git -EA SilentlyContinue).Source   # LocalSystem PATH may lack git
+if ($gitExe) { $envs += "BSL_GIT=$gitExe" }
 & $nssm set $ServiceName AppEnvironmentExtra @envs
 & $nssm set $ServiceName AppStdout "$bundle\service.out.log"
 & $nssm set $ServiceName AppStderr "$bundle\service.err.log"

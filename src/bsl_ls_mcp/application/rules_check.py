@@ -8,7 +8,7 @@ from ..domain.checks.bsl_line import split_text
 from ..domain.checks.bsl_module import ModuleModel
 from ..domain.checks.engine import FileUnderCheck, check_files, own_modules, task_methods
 from ..domain.checks.findings import finish
-from ..domain.checks.module_names import common_module_path, module_label
+from ..domain.checks.module_names import common_module_paths, module_label
 from ..domain.checks.registry import default_ruleset, ruleset_from_registry
 from ..domain.ports import ChangeSource
 
@@ -60,16 +60,26 @@ def run_rules_check(source: ChangeSource, registry: dict | None, *,
     files, changes = _files(source, paths)
     cache: dict[str, ModuleModel | None] = {}
 
+    prefixes = tuple(getattr(source, "config_prefixes", ("",)))
+
     def common_module(name: str) -> ModuleModel | None:
         key = name.casefold()
         if key not in cache:
-            text = source.new_text(common_module_path(name))
+            text = None
+            for path in common_module_paths(name, prefixes):
+                text = source.new_text(path)
+                if text is not None:
+                    break
             cache[key] = ModuleModel(split_text(text)) if text is not None else None
         return cache[key]
 
     findings = check_files(files, rules, own=own_modules((c.status, c.path) for c in changes),
                            common_module=common_module)
-    return finish(findings, list(rules.exceptions), list(rules.problems))
+    result = finish(findings, list(rules.exceptions), list(rules.problems))
+    base = getattr(source, "base_info", None)
+    if base:
+        result["база"] = base
+    return result
 
 
 def run_task_methods(source: ChangeSource, *, paths: list[str] | None = None) -> list[dict]:

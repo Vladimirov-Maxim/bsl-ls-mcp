@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bsl-ls-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP-обёртка над BSL Language Server: статический анализ и навигация по коду 1С (BSL)"
 readme = "README.md"
 requires-python = ">=3.10"

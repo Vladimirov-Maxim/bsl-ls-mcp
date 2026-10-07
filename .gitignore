@@ -31,3 +31,6 @@ nssm.exe
 server.log
 bsl-ls-server.log
 out/
+
+# Local virtualenv
+.venv/

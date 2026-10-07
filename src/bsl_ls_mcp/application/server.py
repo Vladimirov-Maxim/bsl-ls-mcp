@@ -156,19 +156,20 @@ def _source(repo: str | None, base: str, rev: str | None, baseline: str | None, 
 
 
 @mcp.tool()
-async def bsl_rules_check(repo: str | None = None, base: str = "HEAD", rev: str | None = None,
+async def bsl_rules_check(repo: str | None = None, base: str | None = None, rev: str | None = None,
                           baseline: str | None = None, target: str | None = None,
                           rules: str | None = None, paths: list[str] | None = None,
                           only: list[str] | None = None) -> dict:
     """Проверка правок задачи по правилам проекта (шаблоны и проверки кода: циклы и чтение
     базы, форма транзакции, параметры, служебный интерфейс чужих модулей и др.).
-    Источник правок — РОВНО ОДИН: repo (git-репозиторий выгрузки; base — коммит до задачи,
-    rev — ревизия вместо рабочей копии) ИЛИ пара baseline + target (каталоги эталон/копия).
+    Источник правок — РОВНО ОДИН: repo (git-репозиторий исходников — выгрузки конфигуратора
+    или проекта EDT; base — коммит до задачи, по умолчанию точка ответвления от develop,
+    иначе HEAD; rev — ревизия вместо рабочей копии) ИЛИ пара baseline + target (каталоги).
     Проверяются только строки задачи; новый файл — целиком.
     rules — реестр правил проекта (JSON; по умолчанию BSL_RULES; без реестра — встроенный
     каталог проверок). only — подмножество ид правил; paths — только эти пути задачи.
     Возвращает {"находки":[{ид, уровень, файл, строка, текст, регламент}], "исключены":[...],
-    "пропущено":[{что, почему}]}. Индекс LSP не используется — ответ не зависит от него."""
+    "пропущено":[{что, почему}], "база":{ревизия, как} — для repo}. Индекс LSP не используется."""
     def run() -> dict:
         source = _source(repo, base, rev, baseline, target)
         return run_rules_check(source, load_rules(_s, _rules_path(rules)), paths=paths, only=only)
@@ -176,7 +177,7 @@ async def bsl_rules_check(repo: str | None = None, base: str = "HEAD", rev: str 
 
 
 @mcp.tool()
-async def bsl_task_methods(repo: str | None = None, base: str = "HEAD", rev: str | None = None,
+async def bsl_task_methods(repo: str | None = None, base: str | None = None, rev: str | None = None,
                            baseline: str | None = None, target: str | None = None,
                            paths: list[str] | None = None) -> list[dict]:
     """Новые и изменённые методы задачи: [{файл, модуль, метод, вид, экспорт, строки, статус}],

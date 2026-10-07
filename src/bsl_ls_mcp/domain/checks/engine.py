@@ -11,7 +11,10 @@ from .code_rules import FileContext
 from .findings import Finding
 from .registry import RuleSet
 
-_OWN_COMMON_MODULE = re.compile(r"^CommonModules/([^/]+)\.xml$", re.IGNORECASE)
+# Описание нового общего модуля: `CommonModules/<Имя>.xml` (конфигуратор) или
+# `CommonModules/<Имя>/<Имя>.mdo` (EDT), возможно под префиксом корня конфигурации.
+_OWN_COMMON_MODULE = re.compile(r"(?:^|/)CommonModules/(?:([^/]+)\.xml|([^/]+)/\2\.mdo)$",
+                                re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -23,12 +26,12 @@ class FileUnderCheck:
 
 
 def own_modules(changes: Iterable[tuple[str, str]]) -> frozenset[str]:
-    """Общие модули, созданные задачей (новый `CommonModules/<Имя>.xml`), — без учёта регистра."""
+    """Общие модули, созданные задачей (новое описание общего модуля), — без учёта регистра."""
     out = set()
     for status, path in changes:
-        m = _OWN_COMMON_MODULE.match(path)
+        m = _OWN_COMMON_MODULE.search(path)
         if status == "A" and m:
-            out.add(m.group(1).casefold())
+            out.add((m.group(1) or m.group(2)).casefold())
     return frozenset(out)
 
 

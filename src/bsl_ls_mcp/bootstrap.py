@@ -15,12 +15,14 @@ from .infrastructure.stdio_lsp_client import StdioLspClient
 from .settings import Settings
 
 
-def build_change_source(settings: Settings, *, repo: str | None = None, base: str = "HEAD",
+def build_change_source(settings: Settings, *, repo: str | None = None, base: str | None = None,
                         rev: str | None = None, baseline: str | None = None,
                         target: str | None = None) -> ChangeSource:
-    """Источник правок задачи: git-репозиторий выгрузки или пара каталогов."""
+    """Источник правок задачи: git-репозиторий исходников или пара каталогов.
+    base не задан — точка ответвления от ветки разработки (BSL_BASE_BRANCH), иначе HEAD."""
     if repo:
-        return GitChangeSource(repo, base or "HEAD", rev, git=settings.git_path)
+        return GitChangeSource(repo, base or None, rev, git=settings.git_path,
+                               base_branch=settings.base_branch)
     return DirPairChangeSource(baseline, target)
 
 

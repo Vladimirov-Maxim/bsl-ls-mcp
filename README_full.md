@@ -7,12 +7,13 @@
 `mcp__bsl-ls__*`, подключаемый к любому MCP-клиенту. Короткая версия README —
 в [README.md](README.md).
 
-**Требования:** Windows; Python 3.10+ или готовый бандл; Java 17+ или portable JRE
-в бандле; рабочая копия исходников 1С в формате CR-выгрузки.
+**Требования:** Windows; Python 3.10+ или готовый бандл; Java 21+ или portable JRE
+в бандле; рабочая копия исходников 1С — выгрузка конфигуратора или проект EDT
+(формат определяется по корню: `Configuration.xml` или `Configuration/Configuration.mdo`).
 
 ## Структура
 ```
-server/   bsl-language-server-0.29.0-exec.jar   — сервер (pin v0.29.0)
+server/   bsl-language-server-1.0.7-exec.jar    — сервер (pin v1.0.7, нужна Java 21)
 pyproject.toml                                  — пакет (pip install -e .), команда bsl-ls-mcp
 build.ps1 + run.cmd                             — сборка нативного бандла + запуск (см. ниже)
 install-service.ps1 (+ nssm.exe в бандле)       — установка Windows-службы
@@ -60,10 +61,10 @@ bsl-ls-mcp.exe (служба :8081)
 
 ## Запуск с нуля (пошагово)
 
-Нужно в любом случае: рабочая копия исходников 1С (CR-выгрузка) и **~14 ГБ
+Нужно в любом случае: рабочая копия исходников 1С (выгрузка конфигуратора или проект EDT) и **~14 ГБ
 свободной RAM** (live-set индекса корпуса ~12.6 ГБ; меньше — вечный GC).
 
-### Сценарий А — машина с Python 3.10+ и Java 17+ (разработка)
+### Сценарий А — машина с Python 3.10+ и Java 21+ (разработка)
 ```powershell
 cd ...\bsl-ls-mcp
 py -3 -m pip install -e .                      # 1. установка пакета
@@ -165,8 +166,9 @@ bsl-ls-mcp --transport streamable-http --port 8081   # → http://127.0.0.1:8081
 |---|---|---|
 | **источник/пути** | | |
 | `BSL_WORKSPACE` | `C:\1c\src\cf` | исходники базы 1С (рабочая копия, её индексирует сервер). **Смена подхватывается только полным рестартом службы** — см. ниже |
-| `BSL_ALLOWED_ROOTS` | — | доп. корни (через `;`), под которыми разрешён `path`-режим `bsl_diagnostics` (внешние обработки вне корпуса). Всё вне `BSL_WORKSPACE` и этих корней отвергается; UNC-пути запрещены |
-| `BSL_LS_JAR` | `server/bsl-language-server-0.29.0-exec.jar` | путь к jar сервера |
+| `BSL_ALLOWED_ROOTS` | — | доп. корни (через `;`) для путей `repo`/`baseline`/`target`/`rules` проверок правок задачи. `bsl_diagnostics(path)` их не требует: принимает любой локальный путь, UNC запрещён |
+| `BSL_BASE_BRANCH` | `develop` | база правок задачи по умолчанию — `merge-base` с этой веткой (локальной или `origin/`); пусто или ветки нет — `HEAD` |
+| `BSL_LS_JAR` | `server/bsl-language-server-1.0.7-exec.jar` | путь к jar сервера |
 | `BSL_CONFIG` | — | путь к `.bsl-language-server.json` (необязательно) |
 | `BSL_SERVER_LOG` | — | файл для stderr java-сервера (диагностика); пусто — отбрасывать |
 | `BSL_STATUS_FILE` | `%ProgramData%\bsl-ls-mcp\status.json` | файл состояния индекса (`idle`/`building`/`ready`) — пишет демон; для мониторинга/диагностики |
@@ -226,11 +228,11 @@ Bind-mount исходников 1С в Docker на Windows (WSL2/9p) — гла�
 ```
 bsl-ls-mcp\
 ├─ bsl-ls-mcp.exe     ← PyInstaller: Python + mcp + uvicorn (~160 МБ)
-├─ server\bsl-language-server-0.29.0-exec.jar
+├─ server\bsl-language-server-1.0.7-exec.jar
 ├─ run.cmd            ← задаёт ENV (BSL_LS_JAR/BSL_JAVA/BSL_WORKSPACE/BSL_XMX=14g) и стартует демон
 └─ jre\               ← ОПЦИОНАЛЬНО: portable Temurin JRE 21, только если на машине нет Java
 ```
-**Java:** по умолчанию `run.cmd` берёт системную `java` (нужна **17+**, работает на 21) —
+**Java:** по умолчанию `run.cmd` берёт `jre\` бандла, иначе системную `java` (нужна **21+**) —
 `BSL_JAVA` это и задаёт. Бандлить JRE нужно **только** для машины без Java: положить
 portable Temurin JRE 21 в `jre\` и раскомментировать `BSL_JAVA=...\jre\bin\java.exe`.
 (Реальную боль снимает не отказ от Java, а отказ от Docker — bind-mount исходников в WSL2.)
@@ -488,14 +490,17 @@ bsl_task_methods(repo=None, base="HEAD", rev=None, baseline=None, target=None, p
 ```
 - Источник правок — **ровно один**: `repo` (git-репозиторий выгрузки конфигуратора) или пара
   `baseline` + `target` (каталоги «эталон» и «копия с правками», git не нужен).
-- `base` — коммит до начала задачи; `rev` — ревизия вместо рабочей копии.
+- `base` — коммит до начала задачи; по умолчанию — точка ответвления от `develop`
+  (`BSL_BASE_BRANCH`), без такой ветки — `HEAD`; в ответе — поле `база` {ревизия, как}.
+  `rev` — ревизия вместо рабочей копии.
 - Проверяются строки задачи: добавленные и изменённые по `git diff -U0 <base> [<rev>]`;
   новый неотслеживаемый файл — целиком; в паре каталогов — построчное сравнение двух текстов.
 - `paths` — только эти пути (файлы или каталоги от корня выгрузки); `only` — только эти ид.
 - `rules` — путь к реестру правил проекта; по умолчанию `BSL_RULES`; без реестра — встроенный
   каталог (см. ниже). В MCP пути `repo`, `baseline`, `target`, `rules` — только из
   `BSL_WORKSPACE`/`BSL_ALLOWED_ROOTS` (реестр из `BSL_RULES` доверенный).
-- Поддерживается выгрузка конфигуратора; выгрузка EDT — понятная ошибка.
+- Поддерживаются выгрузка конфигуратора и проект EDT; конфигурация может лежать не в корне
+  репозитория (`BF/src/`) — пути в ответе от корня репозитория.
 
 ### Ответ
 ```json

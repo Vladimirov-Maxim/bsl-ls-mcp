@@ -31,7 +31,8 @@ def _parser() -> argparse.ArgumentParser:
                             ("task-methods", "новые и изменённые методы задачи")):
         s = sub.add_parser(name, help=help_text)
         s.add_argument("--repo", help="git-репозиторий выгрузки конфигурации")
-        s.add_argument("--base", default="HEAD", help="коммит до начала задачи (по умолчанию HEAD)")
+        s.add_argument("--base", default=None,
+                       help="коммит до начала задачи (по умолчанию — точка ответвления от develop, иначе HEAD)")
         s.add_argument("--rev", help="ревизия вместо рабочей копии")
         s.add_argument("--baseline", help="каталог-эталон (вместе с --target, без git)")
         s.add_argument("--target", help="каталог-копия с правками (вместе с --baseline)")
