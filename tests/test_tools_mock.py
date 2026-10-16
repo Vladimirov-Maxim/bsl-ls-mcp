@@ -27,9 +27,29 @@ def _settings() -> Settings:
 class FakeLsp:
     """Порт LspServer: канонические ответы + запись фактов вызова."""
 
-    def __init__(self, **canned):
+    def __init__(self, ready=False, diags=None, **canned):
         self.canned = canned
         self.restarted = False
+        self.ready = ready            # индекс готов → диагностики корпуса идут через LSP
+        self.diags = diags or {}      # uri-суффикс → список LSP-диагностик
+        self.warmed = 0
+        self.diag_uris = []
+
+    def is_ready(self):
+        return self.ready
+
+    def warm_up(self):
+        self.warmed += 1
+
+    def is_new(self, uri):
+        return False
+
+    async def diagnostics(self, uri):
+        self.diag_uris.append(uri)
+        for suffix, diags in self.diags.items():
+            if uri.endswith(suffix):
+                return diags
+        return []
 
     async def document_symbol(self, uri):
         # позиция объявления искомого метода в запрошенном модуле

@@ -101,7 +101,7 @@ def test_diagnostics_address_contract():
 
     # существующий каталог проходит валидацию (анализатор-заглушка -> пусто)
     r = asyncio.run(T.bsl_diagnostics(deps, path=str(WS)))
-    assert r == {"diagnostics": [], "suppressed": {"total": 0, "by_code": []}}
+    assert r == {"diagnostics": [], "suppressed": {"total": 0, "by_code": []}, "источник": {"движок": "analyze"}}
 
 
 def test_diagnostics_address_validation():
@@ -288,7 +288,7 @@ def test_diagnostics_path_any_local():
             return []
 
     deps = T.Deps(lsp=None, analyzer=FakeAnalyzer(), settings=confined)
-    empty = {"diagnostics": [], "suppressed": {"total": 0, "by_code": []}}
+    empty = {"diagnostics": [], "suppressed": {"total": 0, "by_code": []}, "источник": {"движок": "analyze"}}
 
     def must_raise(path):
         try:
