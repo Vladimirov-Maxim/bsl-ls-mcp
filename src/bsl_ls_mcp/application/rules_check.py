@@ -41,16 +41,18 @@ def _wanted(path: str, paths: list[str] | None) -> bool:
 
 def _files(source: ChangeSource, paths: list[str] | None) -> tuple[list[FileUnderCheck], list]:
     changes = source.changes()
-    files = []
+    return [f for _, f in _files_with_changes(source, paths, changes)], changes
+
+
+def _files_with_changes(source: ChangeSource, paths: list[str] | None, changes: list):
     for c in changes:
         if c.status == "D" or not c.path.lower().endswith(".bsl") or not _wanted(c.path, paths):
             continue
         text = source.new_text(c.path)
         if text is None:
             continue
-        files.append(FileUnderCheck(path=c.path, status=c.status, lines=split_text(text),
-                                    mask=source.changed_lines(c)))
-    return files, changes
+        yield c, FileUnderCheck(path=c.path, status=c.status, lines=split_text(text),
+                                mask=source.changed_lines(c))
 
 
 def run_rules_check(source: ChangeSource, registry: dict | None, *,
@@ -82,10 +84,22 @@ def run_rules_check(source: ChangeSource, registry: dict | None, *,
     return result
 
 
+def _base_names(source: ChangeSource, change) -> frozenset[str] | None:
+    """Имена методов базовой версии файла (casefold): новый файл — пусто (все методы новые);
+    базу не удалось прочитать — None (тогда «новый» — по добавленной строке объявления)."""
+    if change.status == "A":
+        return frozenset()
+    old = source.old_text(change)
+    if old is None:
+        return None
+    return frozenset(m.name.casefold() for m in ModuleModel(split_text(old)).methods)
+
+
 def run_task_methods(source: ChangeSource, *, paths: list[str] | None = None) -> list[dict]:
     """Новые и изменённые методы задачи — `[{файл, модуль, метод, вид, экспорт, строки, статус}]`."""
-    files, _ = _files(source, paths)
     out: list[dict] = []
-    for f in files:
-        out += task_methods(f, module_label(f.path))
+    for c, f in _files_with_changes(source, paths, source.changes()):
+        if not f.mask:
+            continue          # только окончания строк и т. п. — правки задачи в файле нет
+        out += task_methods(f, module_label(f.path), _base_names(source, c))
     return sorted(out, key=lambda r: (r["файл"], r["строки"][0]))

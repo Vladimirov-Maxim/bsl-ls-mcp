@@ -21,6 +21,7 @@ class SourceError(Exception):
 class Change:
     status: str    # "A" | "M" | "D" (переименование — новый путь со статусом "R")
     path: str      # от корня выгрузки, прямые косые
+    old_path: str | None = None   # прежний путь переименованного/скопированного файла
 
 
 class ChangeSource(Protocol):
@@ -40,6 +41,10 @@ class ChangeSource(Protocol):
 
     def new_text(self, path: str) -> str | None:
         """Текст новой версии файла (None — файла нет)."""
+        ...
+
+    def old_text(self, change: Change) -> str | None:
+        """Текст базовой версии файла (None — в базе файла не было)."""
         ...
 
 
