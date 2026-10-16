@@ -24,7 +24,7 @@ def build_change_source(settings: Settings, *, repo: str | None = None, base: st
     if repo:
         return GitChangeSource(repo, base or None, rev, git=settings.git_path,
                                base_branch=settings.base_branch)
-    return DirPairChangeSource(baseline, target)
+    return DirPairChangeSource(baseline, target, git=settings.git_path)
 
 
 def load_rules(settings: Settings, path: str | Path | None) -> dict | None:
