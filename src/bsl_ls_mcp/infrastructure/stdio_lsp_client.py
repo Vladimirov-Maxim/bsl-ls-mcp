@@ -10,10 +10,12 @@ import asyncio
 import json
 import sys
 import urllib.parse
+from pathlib import Path
 from typing import Any
 
 from ..domain.mapper import uri_to_path  # единый uri→path (без дубля)
 from ..settings import Settings
+from .freshness import CREATED, DELETED, WorkspaceChanges
 from .winjob import assign_kill_on_close
 
 
@@ -49,6 +51,12 @@ class StdioLspClient:
         self._progress_active: set[str] = set()
         self._progress_ticks: dict[str, int] = {}
         self._heavy_done = False
+        # свежесть: правки файлов на диске, о которых сервер ещё не знает
+        self._changes: WorkspaceChanges | None = None
+        self._fresh_lock = asyncio.Lock()
+        self._fresh_at = 0.0
+        self._warm_task: asyncio.Task | None = None
+        self._created: set[str] = set()   # созданы после индексации (норм. URI)
 
     # ---------- жизненный цикл ----------
     async def start(self) -> None:
@@ -77,7 +85,14 @@ class StdioLspClient:
         if self._s.server_log:
             self._log_fh = open(self._s.server_log, "ab")  # noqa: SIM115
             stderr = self._log_fh
-        args = ["-Xmx" + self._s.xmx, "-jar", str(self._s.jar_path), "lsp"]
+        args = ["-Xmx" + self._s.xmx]
+        if self._s.bsl_config:
+            # LSP-режим BSL LS 1.0.x выбирает конфиг при initialize сам: путь из свойства
+            # app.configuration.path (по умолчанию — от рабочего каталога), затем корень
+            # workspace, затем домашний каталог; `-c` на этот выбор не влияет. Без свойства
+            # сервер работал на наборе диагностик по умолчанию.
+            args.append(f"-Dapp.configuration.path={Path(self._s.bsl_config).resolve()}")
+        args += ["-jar", str(self._s.jar_path), "lsp"]
         if self._s.bsl_config:
             args += ["-c", str(self._s.bsl_config)]
         self._proc = await asyncio.create_subprocess_exec(
@@ -89,6 +104,9 @@ class StdioLspClient:
         # java умрёт вместе с этим процессом при любом завершении (в т.ч. taskkill /F)
         assign_kill_on_close(self._proc.pid)
         self._reader_task = asyncio.create_task(self._read_loop(self._gen))
+        # Снимок «что видит сервер» — ДО индексации: всё, что изменится на диске позже,
+        # уйдёт серверу уведомлением перед запросом (иначе граф отстаёт до реиндекса).
+        await self._baseline()
 
         root_uri = self._s.workspace.resolve().as_uri()
         await self.request("initialize", {
@@ -99,6 +117,7 @@ class StdioLspClient:
                 "textDocument": {
                     "callHierarchy": {"dynamicRegistration": True},
                     "publishDiagnostics": {"relatedInformation": True},
+                    "diagnostic": {"dynamicRegistration": False},   # pull (LSP 3.17)
                     "synchronization": {"dynamicRegistration": True},
                 },
                 "workspace": {"workspaceFolders": True, "configuration": True},
@@ -114,6 +133,7 @@ class StdioLspClient:
     def _reset_state(self) -> None:
         self._fail_pending(ConnectionError("LSP-сессия перезапускается"))
         self._open_docs.clear()
+        self._created.clear()
         self._ready.clear()
         self._progress_seen = False
         self._last_progress = 0.0
@@ -150,6 +170,85 @@ class StdioLspClient:
             f.write_text(json.dumps({"index": state}), encoding="utf-8")
         except Exception:
             pass
+
+    def is_ready(self) -> bool:
+        return (self._proc is not None and self._proc.returncode is None
+                and self._ready.is_set())
+
+    def warm_up(self) -> None:
+        if self.is_ready() or (self._warm_task is not None and not self._warm_task.done()):
+            return
+        self._warm_task = asyncio.create_task(self._warm())
+
+    async def _warm(self) -> None:
+        try:
+            await self._ensure_started()
+        except Exception as exc:  # фон: не роняем вызывающего, но и не молчим
+            print(f"[bsl-ls] прогрев индекса не удался: {exc!r}", file=sys.stderr)
+
+    # ---------- свежесть индекса ----------
+    async def _baseline(self) -> None:
+        if not self._s.freshness:
+            return
+        try:
+            if self._changes is None:
+                self._changes = await asyncio.to_thread(
+                    WorkspaceChanges, self._s.workspace, git=self._s.git_path,
+                    scan_interval=self._s.fresh_scan_sec)
+            await asyncio.to_thread(self._changes.baseline)
+        except Exception as exc:
+            print(f"[bsl-ls] снимок свежести не снят: {exc!r}", file=sys.stderr)
+            self._changes = None
+
+    async def refresh(self) -> int:
+        """Сообщить серверу о правках файлов на диске с момента индексации (или прошлой
+        проверки). Возвращает число найденных изменений.
+
+        Изменённые и новые файлы уходят синхронизацией текста (didOpen/didChange): её
+        сервер обрабатывает по порядку, до следующего запроса. didChangeWatchedFiles
+        он разбирает асинхронно — запрос сразу следом мог ещё видеть старый граф, — поэтому
+        им идут только удалённые файлы и избыток сверх fresh_open_limit (массовая смена
+        ветки: открывать тысячи документов дороже, чем дать серверу дочитать самому)."""
+        if self._changes is None:
+            return 0
+        async with self._fresh_lock:
+            loop = asyncio.get_running_loop()
+            if loop.time() - self._fresh_at < self._s.fresh_min_interval:
+                return 0
+            try:
+                changes = await asyncio.to_thread(self._changes.changes)
+            except Exception as exc:
+                print(f"[bsl-ls] проверка правок не удалась: {exc!r}", file=sys.stderr)
+                return 0
+            self._fresh_at = loop.time()
+            watched = []
+            opened = 0
+            for ch in changes:
+                uri = ch.path.resolve().as_uri() if ch.path.exists() else ch.path.as_uri()
+                key = _norm_uri(uri)
+                if ch.kind == DELETED:
+                    self._created.discard(key)
+                    if self._open_docs.pop(key, None) is not None:
+                        await self.notify("textDocument/didClose", {"textDocument": {"uri": uri}})
+                    watched.append({"uri": uri, "type": DELETED})
+                    continue
+                if ch.kind == CREATED:
+                    self._created.add(key)
+                if opened < self._s.fresh_open_limit:
+                    await self._sync(uri)          # didOpen нового/закрытого, didChange открытого
+                    opened += 1
+                else:
+                    self._open_docs.pop(key, None)
+                    watched.append({"uri": uri, "type": ch.kind})
+            if watched:
+                await self.notify("workspace/didChangeWatchedFiles", {"changes": watched})
+            return len(changes)
+
+    async def _fresh(self) -> None:
+        """Готовый индекс + сервер знает о правках на диске (вход навигации и диагностик)."""
+        await self._ensure_started()
+        await self.wait_ready()
+        await self.refresh()
 
     async def stop(self) -> None:
         self._stopping = True
@@ -384,24 +483,29 @@ class StdioLspClient:
 
     # ---------- методы порта ----------
     async def diagnostics(self, uri: str) -> list[dict]:
-        await self._ensure_started()
-        await self.wait_ready()
-        key = _norm_uri(uri)
-        fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._diag_waiters.setdefault(key, []).append(fut)
-        await self._sync(uri, force=True)  # форсим свежий publishDiagnostics
-        try:
-            return await asyncio.wait_for(fut, self._s.diagnostics_wait_sec)
-        except asyncio.TimeoutError:
-            return []
-        finally:
-            waiters = self._diag_waiters.get(key)
-            if waiters and fut in waiters:
-                waiters.remove(fut)
+        """Диагностики документа на его текущем тексте — pull-запросом textDocument/diagnostic.
+
+        Push (publishDiagnostics) в BSL LS 1.0.x для этого непригоден: публикация приходит
+        только на первый didOpen, на didChange — нет, а у файла, созданного после
+        индексации, первая публикация пустая. Pull отвечает на актуальный текст всегда,
+        но требует открытого документа (на закрытом сервер падает с NPE) — поэтому сначала
+        _sync. Ошибка или тайм-аут — исключение, а не []: пустой список читался бы как
+        «замечаний нет»."""
+        await self._fresh()
+        await self._sync(uri)
+        res = await self.request("textDocument/diagnostic", {"textDocument": {"uri": uri}},
+                                 timeout=self._s.diagnostics_wait_sec)
+        if not isinstance(res, dict) or res.get("kind") != "full":
+            raise RuntimeError(f"textDocument/diagnostic: неожиданный ответ {str(res)[:200]}")
+        return res.get("items", [])
+
+    def is_new(self, uri: str) -> bool:
+        """Файл создан после индексации: метаданных его объекта в контексте сервера нет
+        (тип модуля неизвестен) до bsl_reindex."""
+        return _norm_uri(uri) in self._created
 
     async def prepare_call_hierarchy(self, uri: str, line: int, character: int) -> list[dict]:
-        await self._ensure_started()
-        await self.wait_ready()
+        await self._fresh()
         return await self.request("textDocument/prepareCallHierarchy", {
             "textDocument": {"uri": uri}, "position": {"line": line, "character": character},
         }) or []
@@ -413,32 +517,28 @@ class StdioLspClient:
         return await self.request("callHierarchy/outgoingCalls", {"item": item}) or []
 
     async def definition(self, uri: str, line: int, character: int) -> list[dict]:
-        await self._ensure_started()
-        await self.wait_ready()
+        await self._fresh()
         res = await self.request("textDocument/definition", {
             "textDocument": {"uri": uri}, "position": {"line": line, "character": character},
         })
         return res if isinstance(res, list) else ([res] if res else [])
 
     async def references(self, uri: str, line: int, character: int) -> list[dict]:
-        await self._ensure_started()
-        await self.wait_ready()
+        await self._fresh()
         return await self.request("textDocument/references", {
             "textDocument": {"uri": uri}, "position": {"line": line, "character": character},
             "context": {"includeDeclaration": False},
         }) or []
 
     async def document_symbol(self, uri: str) -> list[dict]:
-        await self._ensure_started()
-        await self.wait_ready()
+        await self._fresh()
         await self._sync(uri)  # свежесть: позиции из актуального текста файла
         return await self.request("textDocument/documentSymbol", {
             "textDocument": {"uri": uri},
         }) or []
 
     async def code_lens(self, uri: str) -> list[dict]:
-        await self._ensure_started()
-        await self.wait_ready()
+        await self._fresh()
         await self._sync(uri)  # свежесть: сложность по актуальному тексту
         return await self.request("textDocument/codeLens", {
             "textDocument": {"uri": uri},

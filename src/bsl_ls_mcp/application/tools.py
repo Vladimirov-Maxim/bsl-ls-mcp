@@ -110,6 +110,41 @@ def _mirror(workspace: Path, files: tuple[Path, ...], tmp_dir: Path) -> dict[str
     return out
 
 
+# Строковый уровень analyze-отчёта по числовому уровню LSP (единая модель — analyze_diagnostic_to_model).
+_LSP_SEVERITY = {1: "Error", 2: "Warning", 3: "Information", 4: "Hint"}
+
+
+def _engine(deps: Deps) -> str:
+    """Источник диагностик кода корпуса. Тёплый LSP видит метаданные всей конфигурации —
+    без ложных UnknownMember/UnusedLocalVariable на её объектах и реквизитах форм, с
+    MissingCommonModuleMethod; analyze видит только переданный каталог."""
+    mode = deps.settings.diag_engine
+    if mode == "analyze" or deps.lsp is None:
+        return "analyze"
+    if mode == "lsp" or deps.lsp.is_ready():
+        return "lsp"
+    return "analyze"
+
+
+def _in_workspace(deps: Deps, p: Path) -> bool:
+    try:
+        p.resolve().relative_to(deps.settings.workspace.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+async def _lsp_raw(deps: Deps, files: list[Path]) -> list[dict]:
+    """Диагностики файлов из тёплого LSP — в форме записей analyze-отчёта."""
+    raw: list[dict] = []
+    for f in files:
+        uri = f.resolve().as_uri()
+        for d in await deps.lsp.diagnostics(uri):
+            raw.append({**d, "severity": _LSP_SEVERITY.get(d.get("severity", 1), "Error"),
+                        "_src_uri": uri})
+    return raw
+
+
 async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
                           path: str | None = None, text: str | None = None,
                           min_severity: str | None = None,
@@ -143,9 +178,16 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
     сколько отсеяно, и дозапрашивает детали через `code='Typo'` (все по этому коду,
     любой severity) или `min_severity='hint'` (всё подряд — на свой риск по объёму).
 
+    Источник (поле "источник"): для кода корпуса (module_full_name и path внутри
+    workspace) — тёплый LSP, когда индекс готов: он видит метаданные конфигурации. Пока
+    индекс строится — пакетный analyze (без контекста конфигурации: возможны ложные
+    UnknownMember на её объектах), сервер при этом прогревается в фоне. Код вне workspace
+    и снипет — всегда analyze. BSL_DIAG_ENGINE=analyze|lsp фиксирует источник.
+
     Возвращает объект:
       {"diagnostics": [<Diagnostic>...],            # показанные, по убыванию severity
-       "suppressed": {"total": N, "by_code": [{"code","severity","count"}...]}}
+       "suppressed": {"total": N, "by_code": [{"code","severity","count"}...]},
+       "источник": {"движок": "lsp" | "analyze", "примечание"?: "..."}}
     """
     if sum(x is not None for x in (module_full_name, path, text)) != 1:
         raise ResolveError("укажите РОВНО ОДИН адрес: module_full_name (модуль корпуса) "
@@ -181,12 +223,40 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
         if target is None:
             raise ResolveError(f"не найден каталог модуля {module_full_name!r}")
         src_dir, fallback = target.src_dir, module_full_name
-        if target.files is not None:
-            # Объект EDT: модули лежат рядом с Forms/ и Commands/ — отдаём analyze только
-            # их, копией с тем же путём от корня, и возвращаем подписи к исходным файлам.
-            tmp_dir = Path(tempfile.mkdtemp(prefix="bsl_obj_"))
-            mirror = _mirror(deps.settings.workspace, target.files, tmp_dir)
-            src_dir = tmp_dir
+
+    # Код корпуса — из тёплого LSP (контекст конфигурации), если он готов.
+    note: str | None = None
+    if text is None and (module_full_name is not None or _in_workspace(deps, src_dir)):
+        if module_full_name is not None and target.files is not None:
+            files = list(target.files)
+        elif only_file is not None:
+            files = [only_file]
+        else:
+            files = sorted(src_dir.rglob("*.bsl"))
+        engine = _engine(deps)
+        if len(files) > deps.settings.diag_lsp_max_files:
+            note = f"файлов больше {deps.settings.diag_lsp_max_files} — пакетный analyze"
+        elif engine == "lsp":
+            try:
+                raw = await _lsp_raw(deps, files)
+                new = [f.name for f in files if deps.lsp.is_new(f.resolve().as_uri())]
+                if new:
+                    note = ("файл создан после индексации — метаданные его объекта сервер не знает "
+                            "(проверки, зависящие от типа модуля, неполны); полный контекст — после bsl_reindex")
+                return _finish(deps, raw, src_dir, fallback, None, code, min_severity, "lsp", note)
+            except (asyncio.TimeoutError, ConnectionError, RuntimeError) as exc:
+                note = f"LSP не ответил ({type(exc).__name__}) — пакетный analyze"
+        elif deps.settings.diag_engine == "auto" and deps.lsp is not None:
+            deps.lsp.warm_up()
+            note = ("индекс строится — пакетный analyze без контекста конфигурации: "
+                    "UnknownMember на её объектах может быть ложным")
+
+    if module_full_name is not None and target.files is not None:
+        # Объект EDT: модули лежат рядом с Forms/ и Commands/ — отдаём analyze только
+        # их, копией с тем же путём от корня, и возвращаем подписи к исходным файлам.
+        tmp_dir = Path(tempfile.mkdtemp(prefix="bsl_obj_"))
+        mirror = _mirror(deps.settings.workspace, target.files, tmp_dir)
+        src_dir = tmp_dir
 
     # Проверка кода — через analyze-CLI (разовый java, без тёплого индекса).
     try:
@@ -200,6 +270,13 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
             shutil.rmtree(tmp_dir, ignore_errors=True)
     if only_file is not None:
         raw = [d for d in raw if _same_file(d.get("_src_uri", ""), only_file)]
+    return _finish(deps, raw, src_dir, fallback, text, code, min_severity, "analyze", note)
+
+
+def _finish(deps: Deps, raw: list[dict], src_dir: Path, fallback: str, text: str | None,
+            code: str | None, min_severity: str, engine: str, note: str | None) -> dict:
+    """Записи диагностик → ответ: подписи, порог, сворачивание по размеру, источник."""
+    source = {"движок": engine, **({"примечание": note} if note else {})}
     ws = deps.settings.workspace
     if text is not None:      # снипет: все диагностики под одной подписью '<snippet>'
         items = [mapper.analyze_diagnostic_to_model(fallback, d) for d in raw]
@@ -212,7 +289,7 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
         shown = sorted((m for m in items if m.code == code),
                        key=lambda m: (-_SEVERITY_RANK.get(m.severity, 0), m.line))
         return {"diagnostics": [asdict(m) for m in shown],
-                "suppressed": {"total": 0, "by_code": []}}
+                "suppressed": {"total": 0, "by_code": []}, "источник": source}
 
     thr = _SEVERITY_RANK.get(min_severity, 2)
     shown = [m for m in items if _SEVERITY_RANK.get(m.severity, 0) >= thr]
@@ -239,7 +316,7 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
     if folded_by_size:
         suppressed["note"] = ("warning свёрнуты из-за размера ответа; запросите детали "
                               "по коду (code='...') или по конкретной процедуре")
-    return {"diagnostics": [asdict(m) for m in shown], "suppressed": suppressed}
+    return {"diagnostics": [asdict(m) for m in shown], "suppressed": suppressed, "источник": source}
 
 
 def _code_loc(loc: dict) -> dict:

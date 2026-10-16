@@ -5,6 +5,31 @@
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-16
+
+### Добавлено
+- **Диагностики кода корпуса из тёплого LSP** (`module_full_name`, `path` внутри workspace),
+  pull-запросом `textDocument/diagnostic`: сервер видит метаданные конфигурации. На `bf_edt`
+  исчезли ложные `UnusedLocalMethod`/`UnusedLocalVariable` в формах, появились
+  `ExecuteExternalCodeInCommonModule`, `CommonModuleInvalidType`, `ServerSideExportFormMethod`,
+  `UsingThisForm`, `MissingCommonModuleMethod`; модуль — 1–2 c вместо ~10 c. Пока индекс
+  строится — прежний analyze, сервер прогревается в фоне. Поле ответа `источник`
+  `{движок, примечание?}`; `BSL_DIAG_ENGINE=auto|lsp|analyze`.
+- **Свежесть графа вызовов** (замечания ЗИ-13, ЗИ-75): перед каждым запросом навигации и
+  диагностик сервер получает правки `.bsl` с начала индексации — по `git status`/`git diff` от
+  HEAD индексации, без git — обходом по mtime. Новый вызов из другого модуля виден в
+  `bsl_callers` без `bsl_reindex`. Настройки `BSL_FRESHNESS`, `BSL_FRESH_MIN_INTERVAL`,
+  `BSL_FRESH_SCAN_SEC`, `BSL_FRESH_OPEN_LIMIT`.
+- Живой тест на настоящем BSL LS (`tests/test_lsp_live.py`, пропускается без Java 21).
+
+### Исправлено
+- LSP-режим работал без конфига проекта: BSL LS 1.0.x игнорирует `-c` у `lsp`, путь теперь
+  передаётся свойством `-Dapp.configuration.path`.
+- Тайм-аут LSP-диагностик больше не превращается в пустой список («замечаний нет»).
+
+### Изменено
+- `--selftest` проверяет через analyze и не прогревает индекс.
+
 ## [0.3.0] — 2026-10-07
 
 ### Добавлено

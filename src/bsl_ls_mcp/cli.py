@@ -127,7 +127,9 @@ def _selftest(module: str | None) -> None:
         print(f"[selftest] модуль: {mod}", file=sys.stderr)
         print("[selftest] проверяю код модуля через analyze-CLI (без индекса, ~неск. секунд)...", file=sys.stderr)
         lsp = build_lsp(s)
-        deps = Deps(lsp=lsp, analyzer=build_analyzer(s), settings=s)
+        # analyze явно: самопроверке не нужен индекс корпуса (~14 ГБ), а auto стал бы его прогревать
+        import dataclasses
+        deps = Deps(lsp=lsp, analyzer=build_analyzer(s), settings=dataclasses.replace(s, diag_engine="analyze"))
         t = time.time()
         try:
             res = await tools.bsl_diagnostics(deps, mod)  # {diagnostics, suppressed} через analyze-CLI

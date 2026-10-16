@@ -67,6 +67,17 @@ class Settings:
     base_branch: str = "develop"    # база правок по умолчанию — merge-base с этой веткой (BSL_BASE_BRANCH);
                                     # пусто или ветки нет — HEAD
 
+    # --- диагностики и свежесть индекса ---
+    diag_engine: str = "auto"       # BSL_DIAG_ENGINE: auto — тёплый LSP (контекст конфигурации), пока
+                                    # индекс строится — analyze; lsp — всегда LSP (ждать индекс);
+                                    # analyze — всегда пакетный analyze (прежнее поведение)
+    diag_lsp_max_files: int = 200   # BSL_DIAG_LSP_MAX_FILES: больше файлов в цели — analyze (каталог целиком)
+    freshness: bool = True          # BSL_FRESHNESS: сообщать серверу о правках файлов на диске
+    fresh_scan_sec: float = 30.0    # BSL_FRESH_SCAN_SEC: обход дерева без git — не чаще раза в N c
+    fresh_min_interval: float = 2.0 # BSL_FRESH_MIN_INTERVAL: проверка правок — не чаще раза в N c
+    fresh_open_limit: int = 300     # BSL_FRESH_OPEN_LIMIT: сколько изменённых файлов за раз отдавать
+                                    # текстом (didOpen/didChange); сверх — didChangeWatchedFiles
+
     @staticmethod
     def from_env() -> "Settings":
         # База для дефолтного пути к jar: в обычном запуске — корень проекта;
@@ -111,6 +122,12 @@ class Settings:
             rules_path=Path(os.environ["BSL_RULES"]) if os.environ.get("BSL_RULES") else None,
             git_path=os.environ.get("BSL_GIT", "git"),
             base_branch=os.environ.get("BSL_BASE_BRANCH", "develop"),
+            diag_engine=os.environ.get("BSL_DIAG_ENGINE", "auto").strip().lower() or "auto",
+            diag_lsp_max_files=int(os.environ.get("BSL_DIAG_LSP_MAX_FILES", "200")),
+            freshness=os.environ.get("BSL_FRESHNESS", "1").strip().lower() not in {"0", "false", "no", "off"},
+            fresh_scan_sec=float(os.environ.get("BSL_FRESH_SCAN_SEC", "30")),
+            fresh_min_interval=float(os.environ.get("BSL_FRESH_MIN_INTERVAL", "2")),
+            fresh_open_limit=int(os.environ.get("BSL_FRESH_OPEN_LIMIT", "300")),
         )
 
 
