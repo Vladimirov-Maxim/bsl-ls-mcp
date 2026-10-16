@@ -85,7 +85,8 @@ async def bsl_callees(full_name: str) -> list[dict]:
 @mcp.tool()
 async def bsl_diagnostics(module_full_name: str | None = None, path: str | None = None,
                           text: str | None = None,
-                          min_severity: str | None = None, code: str | None = None) -> dict:
+                          min_severity: str | None = None, code: str | None = None,
+                          lines: str | None = None, function: str | None = None) -> dict:
     """Диагностики кода. Укажите РОВНО ОДИН адрес:
       module_full_name — модуль корпуса: 'ОбщийМодуль.МойМодуль' | 'Справочник.X.Форма.Имя';
       path — любой локальный каталог или .bsl-файл (внешние обработки/отчёты, расширения),
@@ -100,6 +101,9 @@ async def bsl_diagnostics(module_full_name: str | None = None, path: str | None 
     сворачивает в сводку suppressed.by_code (счётчики по кодам) — чтобы не переполнять
     бюджет на крупных модулях/формах (для text порог по умолчанию 'hint' — всё). Детали:
     code='Typo' (все по коду, любой severity) или min_severity='hint' (всё подряд).
+    Зона правок — lines='2660-2781' | '10-20,35' (один файл цели) ИЛИ function='Метод[,Метод2]':
+    только диагностики, начинающиеся в ней, ВСЕ уровни и без сворачивания; "источник".фильтр
+    называет диапазоны (для function — найденные границы методов, от директив &… до Конец…).
     Источник ("источник".движок): код корпуса (module_full_name и path внутри workspace) —
     тёплый LSP, когда индекс готов: он видит метаданные конфигурации (тип модуля, объекты,
     реквизиты форм) — без ложных UnusedLocalMethod/UnusedLocalVariable в формах, с
@@ -109,7 +113,7 @@ async def bsl_diagnostics(module_full_name: str | None = None, path: str | None 
     UnknownMember ненадёжен в обоих источниках (поля выборок, реквизиты регистров EDT) —
     не гейт. Возвращает {"diagnostics":[...], "suppressed":{"total":N,"by_code":[...]},
     "источник":{"движок":"lsp"|"analyze", "примечание"?}}."""
-    return await tools.bsl_diagnostics(_d(), module_full_name, path, text, min_severity, code)
+    return await tools.bsl_diagnostics(_d(), module_full_name, path, text, min_severity, code, lines, function)
 
 
 @mcp.tool()
