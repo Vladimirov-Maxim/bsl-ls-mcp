@@ -37,7 +37,8 @@ def own_modules(changes: Iterable[tuple[str, str]]) -> frozenset[str]:
 
 def check_files(files: Iterable[FileUnderCheck], rules: RuleSet, *,
                 own: frozenset[str] = frozenset(),
-                common_module: Callable[[str], ModuleModel | None] = lambda name: None) -> list[Finding]:
+                common_module: Callable[[str], ModuleModel | None] = lambda name: None,
+                form_handlers: Callable[[str], dict[str, set[str]]] = lambda path: {}) -> list[Finding]:
     findings: list[Finding] = []
     for f in files:
         if not f.mask:
@@ -56,7 +57,7 @@ def check_files(files: Iterable[FileUnderCheck], rules: RuleSet, *,
                     if t.hits(parts, raw):
                         findings.append(Finding(t.rule_id, t.level, f.path, n, t.text, t.regulation))
         ctx = FileContext(path=f.path, model=model, mask=f.mask, knowledge=rules.knowledge,
-                          own_modules=own, common_module=common_module)
+                          own_modules=own, common_module=common_module, form_handlers=form_handlers(f.path))
         for rule in rules.code_rules:
             ctx.params = rule.params
             for hit in rule.check.run(ctx):

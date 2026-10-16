@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from functools import cached_property
 
+from . import form_events
 from .bsl_module import Method, ModuleModel
 from .knowledge import MAX_PARAMS, Knowledge
 
@@ -39,6 +40,7 @@ class FileContext:
     own_modules: frozenset[str] = frozenset()   # общие модули, созданные задачей (casefold)
     common_module: Callable[[str], ModuleModel | None] = lambda name: None
     params: dict = field(default_factory=dict)  # параметры правила из реестра
+    form_handlers: dict[str, set[str]] = field(default_factory=dict)  # обработчик (casefold) → события
 
     @cached_property
     def touched(self) -> list[Method]:
@@ -402,8 +404,136 @@ def _foreign_internal_api(ctx: FileContext) -> Iterator[Hit]:
 
 
 # ---------------------------------------------------------------------------
+# модуль формы: присваивание свойству формы под видом локальной переменной (ЗИ-45)
+
+_ASSIGN = re.compile(rf"^\s*({_W}+)\s*=(?!=)")
+_VAR_DECL = re.compile(r"^\s*Перем\s+([^;]+)", re.IGNORECASE)
+
+
+def _declared(lines: list[str]) -> set[str]:
+    out: set[str] = set()
+    for line in lines:
+        m = _VAR_DECL.match(line)
+        if m:
+            out.update(v.strip().split()[0].casefold() for v in m.group(1).split(",") if v.strip())
+    return out
+
+
+def _param_names(m: Method) -> set[str]:
+    out = set()
+    for p in m.params:
+        name = re.sub(r"(?i)^\s*Знач\s+", "", p.text.split("=", 1)[0]).strip()
+        if name:
+            out.add(name.casefold())
+    return out
+
+
+# `Новый УникальныйИдентификатор` в строковое свойство-ключ — штатный приём (значение приводится к строке)
+_NEW_OBJECT = re.compile(r"^\s*Новый\s+(?!УникальныйИдентификатор)", re.IGNORECASE)
+
+
+def _form_property_assignment(ctx: FileContext) -> Iterator[Hit]:
+    """Имя свойства формы примитивного типа (Доступность, Заголовок…) использовано как локальная
+    переменная другого типа: без объявления присваивание пишет в форму, и на исполнении —
+    «несоответствие типов» (ЗИ-45). Намеренная запись `Модифицированность = Истина` — не
+    находка: признак переменной — справа `Новый …` либо обращение к имени через `.`/`[]` в
+    том же методе (у Булево/Строки/Числа членов нет)."""
+    if not form_events.is_form_module(ctx.path):
+        return
+    props = {p.casefold(): p for p in ctx.knowledge.form_properties}
+    in_methods = {n for m in ctx.model.methods for n in range(m.start, m.end + 1)}
+    module_vars = _declared([ln for n, ln in enumerate(ctx.model.lines, 1) if n not in in_methods])
+    for m in ctx.touched:
+        own = _param_names(m) | _declared([ctx.model.lines[n - 1] for n in m.body_lines()]) | module_vars
+        body = ctx.model.body(m)
+        for n in m.body_lines():
+            if n not in ctx.mask:
+                continue
+            parts = ctx.model.parts[n - 1]
+            if parts.comment or parts.continuation:
+                continue
+            a = _ASSIGN.match(parts.code)
+            if not a or a.group(1).casefold() not in props or a.group(1).casefold() in own:
+                continue
+            name = props[a.group(1).casefold()]
+            member = re.compile(rf"{_NOT_BEFORE}{re.escape(name)}\s*[.\[]", re.IGNORECASE)
+            used = next((k for k in m.body_lines() if member.search(body.code[k])), None)
+            if _NEW_OBJECT.match(parts.code[a.end():]):
+                why = "справа — объект"
+            elif used is not None:
+                why = f"в строке {used} к нему обращаются через точку/индекс"
+            else:
+                continue
+            yield Hit(n, f"{name} — свойство формы, а не локальная переменная ({why}); "
+                         f"переименуйте переменную")
+
+
+# ---------------------------------------------------------------------------
+# модуль формы: серверный метод в клиентском событии с платформенным запретом (ЗИ-35)
+
+def _directive(ctx: FileContext, m: Method) -> str:
+    """Директива компиляции метода формы (casefold); без директивы — '&насервере' (умолчание
+    платформы для модуля управляемой формы)."""
+    n = m.start - 1
+    while n >= 1 and ctx.model.lines[n - 1].lstrip().startswith("&"):
+        d = ctx.model.lines[n - 1].strip().split("(")[0].casefold()
+        if d in ("&наклиенте", "&насервере", "&насерверебезконтекста", "&наклиентенасерверебезконтекста",
+                 "&наклиентенасервере"):
+            return d
+        n -= 1
+    return "&насервере"
+
+
+def _server_call_in_client_event(ctx: FileContext) -> Iterator[Hit]:
+    """Обработчик события, где платформа запрещает серверные методы формы (НачалоВыбора и др.),
+    прямо или через свои клиентские методы вызывает метод с &НаСервере. Синтаксически валидно,
+    поэтому не ловят ни диагностика, ни синтакс-контроль (ЗИ-35)."""
+    if not form_events.is_form_module(ctx.path):
+        return
+    banned = {e.casefold() for e in ctx.knowledge.no_server_events}
+    handlers = form_events.merge(ctx.form_handlers, form_events.handlers_from_code(ctx.model.lines))
+    methods = {m.name.casefold(): m for m in ctx.model.methods}
+    calls: dict[str, list[tuple[int, str]]] = {}
+    for key, m in methods.items():
+        body = ctx.model.body(m)
+        calls[key] = [(n, c.group(1).casefold()) for n in m.body_lines()
+                      for c in form_events.CALL.finditer(body.code[n]) if c.group(1).casefold() in methods]
+    for m in ctx.touched:
+        events = sorted(e for e in handlers.get(m.name.casefold(), ()) if e.casefold() in banned)
+        if not events:
+            continue
+        for line, callee in calls.get(m.name.casefold(), []):
+            chain = _server_chain(ctx, methods, calls, callee, {m.name.casefold()})
+            if chain:
+                path = " → ".join(methods[c].name for c in chain)
+                yield Hit(line, f"событие {', '.join(events)}: {m.name} → {path} (&НаСервере)")
+
+
+def _server_chain(ctx, methods, calls, start, seen) -> list[str] | None:
+    """Путь от start до серверного метода формы через клиентские (без повторов)."""
+    if start in seen:
+        return None
+    seen = seen | {start}
+    d = _directive(ctx, methods[start])
+    if d == "&насервере":
+        return [start]
+    if d != "&наклиенте":
+        return None                      # БезКонтекста/КлиентСервер — не контекстный серверный вызов
+    for _, callee in calls.get(start, []):
+        tail = _server_chain(ctx, methods, calls, callee, seen)
+        if tail:
+            return [start] + tail
+    return None
+
+
+# ---------------------------------------------------------------------------
 
 CATALOG: dict[str, CodeCheck] = {c.key: c for c in (
+    CodeCheck("form.assign-form-property", "Warn",
+              "присваивание свойству формы под видом локальной переменной", _form_property_assignment),
+    CodeCheck("form.server-call-in-client-event", "Warn",
+              "серверный метод формы в клиентском событии, где платформа это запрещает",
+              _server_call_in_client_event),
     CodeCheck("out-param.uninitialized", "Fail",
               "переменная впервые появляется выходным параметром, присваивания выше нет",
               _out_param_uninitialized),
