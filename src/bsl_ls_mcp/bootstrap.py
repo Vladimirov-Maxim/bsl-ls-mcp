@@ -6,12 +6,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .domain.ports import ChangeSource, CodeAnalyzer, LspServer
+from .domain.ports import ChangeSource, CodeAnalyzer, LspServer, TextSearch
 from .infrastructure.analyze_cli import AnalyzeCliRunner
 from .infrastructure.dir_changes import DirPairChangeSource
 from .infrastructure.git_changes import GitChangeSource
 from .infrastructure.registry_file import load_registry
 from .infrastructure.stdio_lsp_client import StdioLspClient
+from .infrastructure.text_search import WorkspaceTextSearch
 from .settings import Settings
 
 
@@ -35,6 +36,11 @@ def load_rules(settings: Settings, path: str | Path | None) -> dict | None:
 def build_lsp(settings: Settings) -> LspServer:
     """Создать языковой сервис (навигация по тёплому индексу). Возвращает ПОРТ."""
     return StdioLspClient(settings)
+
+
+def build_search(settings: Settings) -> TextSearch:
+    """Текстовый поиск по workspace (вызовы по строковому имени для bsl_callers)."""
+    return WorkspaceTextSearch(settings.workspace, git=settings.git_path)
 
 
 def build_analyzer(settings: Settings) -> CodeAnalyzer:

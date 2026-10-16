@@ -43,6 +43,14 @@ class ChangeSource(Protocol):
         ...
 
 
+class TextSearch(Protocol):
+    """Текстовый поиск по .bsl workspace — кандидаты для вызовов по строковому имени."""
+
+    def files_with(self, fragment: str) -> list[tuple[Path, str]]:
+        """(путь, текст) файлов, содержащих fragment (регистр учитывается)."""
+        ...
+
+
 class CodeAnalyzer(Protocol):
     """Проверка кода (диагностики) — пофайловый статический анализ, БЕЗ индекса.
     Отдельный шов от LspServer: навигации нужен тёплый граф, проверке — нет.
