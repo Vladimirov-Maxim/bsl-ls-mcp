@@ -1,14 +1,21 @@
 """Источник правок — пара каталогов эталон ↔ копия, без git. Это задачи по внешним
 обработкам и отчётам: эталон из вложения против правленой копии. Состав — сравнением
 деревьев по содержимому (A — только в копии, D — только в эталоне, M — различаются),
-строки задачи — построчным сравнением двух текстов."""
+строки задачи — `git diff --no-index` двух файлов (тот же алгоритм, что в git-режиме: иначе
+одинаковые строки, например пустые, выравниваются по-разному и находка уходит не на
+добавленную строку, BSL-2), без git — построчным сравнением двух текстов."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from ..domain.checks.bsl_line import split_text
-from ..domain.checks.mask import mask_from_texts, whole_file
+from ..domain.checks.mask import mask_from_texts, mask_from_unified_diff, whole_file
 from ..domain.ports import Change, SourceError
+
+_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
 def _files(root: Path) -> dict[str, Path]:
@@ -23,9 +30,12 @@ class DirPairChangeSource:
     mode = "каталоги"
     config_prefixes = ("",)
 
-    def __init__(self, baseline: str | Path, target: str | Path) -> None:
+    def __init__(self, baseline: str | Path, target: str | Path, *, git: str | None = "git",
+                 timeout: float = 120) -> None:
         self.baseline = Path(baseline).resolve()
         self.target = Path(target).resolve()
+        self._git_exe = git
+        self._timeout = timeout
         for p in (self.baseline, self.target):
             if not p.is_dir():
                 raise SourceError(f"каталог не найден: {p}")
@@ -52,7 +62,25 @@ class DirPairChangeSource:
         old_path = self.baseline / change.path
         if change.status == "A" or not old_path.is_file():
             return whole_file(new_lines)
+        mask = self._git_mask(old_path, self.target / change.path)
+        if mask is not None:
+            return mask
         return mask_from_texts(split_text(_read(old_path)), new_lines)
+
+    def _git_mask(self, old: Path, new: Path) -> frozenset[int] | None:
+        """Маска по `git diff --no-index -U0 --ignore-cr-at-eol`; None — git недоступен."""
+        if not self._git_exe:
+            return None
+        cmd = [self._git_exe, "-c", "core.quotepath=off", "diff", "--no-index", "--unified=0", "--no-color",
+               "--no-ext-diff", "--no-textconv", "--ignore-cr-at-eol", "--", str(old), str(new)]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=self._timeout, creationflags=_NO_WINDOW,
+                               env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if r.returncode not in (0, 1):      # 1 — файлы различаются
+            return None
+        return mask_from_unified_diff(r.stdout.decode("utf-8", errors="replace"))
 
     def old_text(self, change: Change) -> str | None:
         full = self.baseline / change.path

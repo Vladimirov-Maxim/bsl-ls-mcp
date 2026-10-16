@@ -240,19 +240,26 @@ _ATTRIBUTE_VALUE = re.compile(r"ЗначениеРеквизитаОбъекта
 
 def _repeated_attribute_value(ctx: FileContext) -> Iterator[Hit]:
     """Второй ЗначениеРеквизитаОбъекта по той же ссылке в одном методе — два обращения
-    к базе вместо одного ЗначенияРеквизитовОбъекта."""
+    к базе вместо одного ЗначенияРеквизитовОбъекта. Находка — на строке задачи: повторный
+    вызов, добавленный задачей, — со ссылкой на первый; если задача добавила первый вызов
+    перед уже существующими, — на нём, а старые даны контекстом (BSL-4)."""
     for m in ctx.touched:
         body = ctx.model.body(m)
-        first: dict[str, int] = {}
+        calls: dict[str, tuple[str, list[int]]] = {}
         for n in m.body_lines():
             for a in _ATTRIBUTE_VALUE.finditer(body.code[n]):
                 ref = a.group(1).strip()
-                key = ref.casefold()
-                if key in first:
-                    if n in ctx.mask or first[key] in ctx.mask:
-                        yield Hit(n, f"{ref}, первый вызов — строка {first[key]}")
-                else:
-                    first[key] = n
+                calls.setdefault(ref.casefold(), (ref, []))[1].append(n)
+        for ref, lines in calls.values():
+            if len(lines) < 2:
+                continue
+            first, rest = lines[0], lines[1:]
+            repeated_in_task = [n for n in rest if n in ctx.mask]
+            for n in repeated_in_task:
+                yield Hit(n, f"{ref}, первый вызов — строка {first}")
+            if not repeated_in_task and first in ctx.mask:
+                others = ", ".join(str(n) for n in rest)
+                yield Hit(first, f"{ref}, повторные вызовы в существующем коде — строки {others}")
 
 
 _MOVEMENTS_WRITE = re.compile(rf"Движения\.{_W}+\.Записать\s*\(", re.IGNORECASE)

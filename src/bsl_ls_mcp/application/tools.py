@@ -496,21 +496,35 @@ async def bsl_references(deps: Deps, full_name: str) -> list[dict]:
 async def bsl_complexity(deps: Deps, module_full_name: str,
                          function: str | None = None) -> list[dict]:
     """Когнитивная и цикломатическая сложность методов модуля (метрика ревьюеру).
-    module_full_name: 'ОбщийМодуль.МойМодуль'; function (опц.) — только этот метод.
+    module_full_name: 'ОбщийМодуль.МойМодуль' | 'Отчет.Х' (все модули объекта — менеджер,
+    объект…; full_name тогда несёт модуль: 'Отчет.Х.МодульОбъекта.Метод') | форма/конкретный
+    модуль; function (опц.) — только этот метод (без учёта регистра).
     Числа берутся из code lens сложности (textDocument/codeLens + codeLens/resolve)."""
     if module_full_name.count(".") < 1:
         raise ResolveError("ожидался формат Тип.Модуль, напр. 'ОбщийМодуль.МойМодуль'")
-    uri = resolver.module_file_uri(deps.settings.workspace, module_full_name)
-    if uri is None:
+    ws = deps.settings.workspace
+    uris = resolver.module_file_uris(ws, module_full_name)
+    if not uris:
         raise ResolveError(f"не найден файл модуля {module_full_name!r}")
 
+    out: list[dict] = []
+    for uri in uris:
+        prefix = module_full_name
+        if len(uris) > 1:   # несколько модулей объекта — адрес каждого (МодульОбъекта/…)
+            prefix = mapper.analyze_label_from_uri(ws, uri) or module_full_name
+        out += await _complexity_of(deps, uri, prefix, function)
+    return out
+
+
+async def _complexity_of(deps: Deps, uri: str, prefix: str, function: str | None) -> list[dict]:
     # отбираем линзы сложности нужного метода
     lenses = [
         (mapper.lens_complexity_kind(ln), mapper.lens_method_name(ln), ln)
         for ln in await deps.lsp.code_lens(uri)
     ]
+    wanted = function.casefold() if function is not None else None
     lenses = [(k, m, ln) for k, m, ln in lenses
-              if k is not None and (function is None or m == function)]
+              if k is not None and (wanted is None or m.casefold() == wanted)]
 
     # резолвим параллельно (каждый resolve — отдельный round-trip)
     resolved = await asyncio.gather(*(deps.lsp.resolve_code_lens(ln) for _, _, ln in lenses))
@@ -521,7 +535,7 @@ async def bsl_complexity(deps: Deps, module_full_name: str,
 
     return [
         asdict(Complexity(
-            full_name=f"{module_full_name}.{method}",
+            full_name=f"{prefix}.{method}",
             cognitive=vals.get("cognitive"),     # None — если метрика не измерена
             cyclomatic=vals.get("cyclomatic"),
         ))

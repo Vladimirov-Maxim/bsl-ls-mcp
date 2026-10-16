@@ -252,6 +252,19 @@ def module_file_uri(workspace: Path, module_full_name: str) -> str | None:
     return module_uri(workspace, parts[0], parts[1])
 
 
+def module_file_uris(workspace: Path, module_full_name: str) -> list[str]:
+    """Все файлы модулей по адресу: для 'Тип.Объект' — каждый существующий модуль объекта
+    (менеджер, объект, набор записей, менеджер значения); для формы, команды, конкретного
+    модуля и общего модуля — один файл, как module_file_uri."""
+    parts = module_full_name.split(".")
+    if len(parts) == 2:
+        uris = candidate_uris(workspace, parts[0], parts[1])
+        if uris:
+            return uris
+    uri = module_file_uri(workspace, module_full_name)
+    return [uri] if uri else []
+
+
 def split_full_name(full_name: str) -> tuple[str, str, str]:
     """'ОбщийМодуль.МойМодуль.ИмяФункции' -> ('ОбщийМодуль', 'МойМодуль', 'ИмяФункции').
     (Оставлен для совместимости; символьный путь использует symbol_candidates.)"""
