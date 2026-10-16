@@ -54,6 +54,10 @@ class DirPairChangeSource:
             return whole_file(new_lines)
         return mask_from_texts(split_text(_read(old_path)), new_lines)
 
+    def old_text(self, change: Change) -> str | None:
+        full = self.baseline / change.path
+        return _read(full) if full.is_file() else None
+
     def new_text(self, path: str) -> str | None:
         full = self.target / path
         return _read(full) if full.is_file() else None

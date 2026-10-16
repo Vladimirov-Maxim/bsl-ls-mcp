@@ -128,8 +128,9 @@ class GitChangeSource:
                     continue
                 parts = line.split("\t")
                 status = parts[0][:1]
-                path = parts[2] if status in ("R", "C") and len(parts) > 2 else parts[1]
-                out.append(Change(status=status, path=path))
+                renamed = status in ("R", "C") and len(parts) > 2
+                path = parts[2] if renamed else parts[1]
+                out.append(Change(status=status, path=path, old_path=parts[1] if renamed else None))
             # Новые файлы задачи ещё не в индексе, а diff видит только отслеживаемые.
             # При сравнении двух ревизий неотслеживаемых нет — всё уже в истории.
             if self.rev is None:
@@ -140,14 +141,24 @@ class GitChangeSource:
         return self._changes
 
     def changed_lines(self, change: Change) -> frozenset[int]:
+        # --ignore-cr-at-eol: файл, у которого поменялись только окончания строк (CRLF↔LF —
+        # выгрузка, EDT, редактор), правкой задачи не считается — иначе весь чужой модуль
+        # попадал в «строки задачи» и в новые методы (BSL-5). Пробелы НЕ игнорируются:
+        # отступ — содержательная правка (проверка пустых строк без табуляции).
         diff = self._git("diff", "--unified=0", "--no-color", "--no-ext-diff", "--no-textconv",
-                         *self._range(), "--", change.path)
+                         "--ignore-cr-at-eol", "-M", *self._range(), "--",
+                         *([change.old_path] if change.old_path else []), change.path)
         mask = mask_from_unified_diff(diff)
         if not mask and change.status == "A" and self.rev is None and "@@" not in diff:
             text = self.new_text(change.path)        # неотслеживаемый файл: git diff его не видит
             if text is not None:
                 return whole_file(split_text(text))
         return mask
+
+    def old_text(self, change: Change) -> str | None:
+        if change.status == "A":
+            return None
+        return self._git("show", f"{self.base}:{change.old_path or change.path}", check=False)
 
     def new_text(self, path: str) -> str | None:
         if self.rev is None:

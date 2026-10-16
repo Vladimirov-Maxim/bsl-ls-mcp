@@ -65,14 +65,24 @@ def check_files(files: Iterable[FileUnderCheck], rules: RuleSet, *,
     return findings
 
 
-def task_methods(f: FileUnderCheck, label: str) -> list[dict]:
-    """Методы, которых касается задача: «новый» — строка объявления добавлена задачей
-    (в новом файле — все методы), «изменён» — правка внутри существующего метода."""
+def task_methods(f: FileUnderCheck, label: str, base_names: frozenset[str] | None = None) -> list[dict]:
+    """Методы, которых касается задача: «новый» — метода с таким именем не было в базовой
+    версии файла (в новом файле — все методы), «изменён» — правка в существующем методе,
+    в том числе в его объявлении (параметры). base_names — имена методов базы (casefold);
+    None — база неизвестна: тогда «новый» — объявление добавлено задачей (прежнее правило)."""
     out = []
     for m in ModuleModel(f.lines).methods:
-        if m.start in f.mask:
+        touched = any(m.start <= n <= m.end for n in f.mask)
+        if base_names is not None:
+            if m.name.casefold() not in base_names:
+                status = "новый"
+            elif touched:
+                status = "изменён"
+            else:
+                continue
+        elif m.start in f.mask:
             status = "новый"
-        elif any(m.start < n <= m.end for n in f.mask):
+        elif touched:
             status = "изменён"
         else:
             continue
