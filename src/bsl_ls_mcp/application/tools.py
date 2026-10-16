@@ -432,16 +432,19 @@ def _finish(deps: Deps, raw: list[dict], src_dir: Path, fallback: str, text: str
     hidden = [m for m in items if _SEVERITY_RANK.get(m.severity, 0) < thr]
     shown.sort(key=lambda m: (-_SEVERITY_RANK.get(m.severity, 0), m.line))
 
-    # Адаптив по размеру: если показанное не влезает в бюджет — сворачиваем НЕ-error
-    # (warning) в сводку, ошибки оставляем всегда. Если и одни ошибки за бюджетом —
-    # отдаём как есть (ошибки важнее лимита).
-    folded_by_size = False
-    if zone is None and len(json.dumps([asdict(m) for m in shown], ensure_ascii=False)) > deps.settings.diag_max_chars:
-        non_err = [m for m in shown if m.severity != "error"]
-        if non_err:
-            shown = [m for m in shown if m.severity == "error"]
-            hidden = hidden + non_err
-            folded_by_size = True
+    # Адаптив по размеру: не влезает в бюджет — сворачиваем уровни по одному, с низшего
+    # (hint → info → warning), пока не влезет. error не сворачиваются никогда: если и одни
+    # ошибки за бюджетом — отдаём как есть (ошибки важнее лимита).
+    folded: dict[str, int] = {}
+    if zone is None:
+        for level in ("hint", "info", "warning"):
+            if len(json.dumps([asdict(m) for m in shown], ensure_ascii=False)) <= deps.settings.diag_max_chars:
+                break
+            moved = [m for m in shown if m.severity == level]
+            if moved:
+                shown = [m for m in shown if m.severity != level]
+                hidden = hidden + moved
+                folded[level] = len(moved)
 
     by_code = Counter((m.code, m.severity) for m in hidden)
     summary = sorted(
@@ -449,10 +452,26 @@ def _finish(deps: Deps, raw: list[dict], src_dir: Path, fallback: str, text: str
         key=lambda x: -x["count"],
     )
     suppressed = {"total": len(hidden), "by_code": summary}
-    if folded_by_size:
-        suppressed["note"] = ("warning свёрнуты из-за размера ответа; запросите детали "
-                              "по коду (code='...') или по конкретной процедуре")
+    if folded:
+        suppressed["folded_by_size"] = folded
+        suppressed["note"] = _fold_note(folded, min_severity, shown)
     return {"diagnostics": [asdict(m) for m in shown], "suppressed": suppressed, "источник": source}
+
+
+
+
+def _fold_note(folded: dict[str, int], min_severity: str, shown: list) -> str:
+    """Честная пометка о сворачивании по размеру: какие уровни и сколько, что показано целиком
+    и выдан ли запрошенный уровень."""
+    levels = ", ".join(f"{lv} — {n}" for lv, n in folded.items())
+    kept = sorted({m.severity for m in shown}, key=lambda lv: -_SEVERITY_RANK.get(lv, 0))
+    kept_txt = ", ".join(kept) if kept else "ничего"
+    lowest = min(folded, key=lambda lv: _SEVERITY_RANK.get(lv, 0))
+    asked = ""
+    if _SEVERITY_RANK.get(min_severity, 2) <= _SEVERITY_RANK.get(lowest, 0):
+        asked = f" Запрошенный уровень {min_severity} выдан не целиком."
+    return (f"ответ не уместился в бюджет: свёрнуты уровни {levels}; полностью показаны: {kept_txt}.{asked} "
+            "Детали — code='<Код>' или зона правок lines=/function= (без сворачивания).")
 
 
 def _code_loc(loc: dict) -> dict:
