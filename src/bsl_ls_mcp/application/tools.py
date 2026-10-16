@@ -10,7 +10,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
-from ..domain import mapper, resolver, string_calls
+from ..domain import line_filter, mapper, resolver, string_calls
 from ..domain.checks.bsl_line import split_text
 from ..domain.models import Complexity
 from ..domain.ports import CodeAnalyzer, LspServer, TextSearch
@@ -174,10 +174,64 @@ async def _lsp_raw(deps: Deps, files: list[Path]) -> list[dict]:
     return raw
 
 
+def _path_key(p: Path) -> str:
+    return str(p.resolve()).casefold()
+
+
+def _scope(files: list[Path], lines: str | None, function: str | None
+           ) -> tuple[dict[str, list[tuple[int, int]]], dict]:
+    """Зона правок: файл → диапазоны строк, и её описание для ответа."""
+    if lines is not None and function is not None:
+        raise ResolveError("укажите lines ИЛИ function, не оба сразу")
+    if lines is not None:
+        if len(files) != 1:
+            names = ", ".join(f.name for f in files[:6])
+            raise ResolveError(
+                f"lines относится к одному файлу, а в цели их {len(files)} ({names}): укажите модуль "
+                "('Тип.Объект.МодульОбъекта' / '.МодульМенеджера' / '.Форма.Имя'), path к файлу или function=")
+        try:
+            ranges = line_filter.parse_lines(lines)
+        except ValueError as exc:
+            raise ResolveError(str(exc)) from None
+        return {_path_key(files[0]): list(ranges)}, {"строки": [list(r) for r in ranges]}
+    names = [n.strip() for n in function.split(",") if n.strip()]
+    if not names:
+        raise ResolveError("function: пустое имя метода")
+    scope: dict[str, list[tuple[int, int]]] = {}
+    found: dict[str, list[int]] = {}
+    for f in files:
+        try:
+            text = f.read_bytes().decode("utf-8-sig", errors="replace")
+        except OSError:
+            continue
+        for name, (lo, hi) in line_filter.method_ranges(split_text(text), names).items():
+            scope.setdefault(_path_key(f), []).append((lo, hi))
+            label = name if len(files) == 1 else f"{f.name}:{name}"
+            found[label] = [lo, hi]
+    seen = {k.rsplit(":", 1)[-1].casefold() for k in found}
+    missing = [n for n in names if n.casefold() not in seen]
+    if missing:
+        raise ResolveError(f"метод не найден в цели: {', '.join(missing)}")
+    return scope, {"методы": found}
+
+
+def _apply_scope(raw: list[dict], scope: dict[str, list[tuple[int, int]]] | None) -> list[dict]:
+    if scope is None:
+        return raw
+    out = []
+    for d in raw:
+        ranges = scope.get(_uri_key(d.get("_src_uri", "")))
+        line = (d.get("range", {}).get("start", {}).get("line", 0)) + 1
+        if ranges and line_filter.in_ranges(line, ranges):
+            out.append(d)
+    return out
+
+
 async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
                           path: str | None = None, text: str | None = None,
                           min_severity: str | None = None,
-                          code: str | None = None) -> dict:
+                          code: str | None = None, lines: str | None = None,
+                          function: str | None = None) -> dict:
     """Диагностики кода. Блокирующий гейт developer/reviewer.
 
     Ровно ОДИН из адресов:
@@ -213,6 +267,13 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
     UnknownMember на её объектах), сервер при этом прогревается в фоне. Код вне workspace
     и снипет — всегда analyze. BSL_DIAG_ENGINE=analyze|lsp фиксирует источник.
 
+    Зона правок — lines ИЛИ function: только диагностики, начинающиеся в ней, по умолчанию
+    ВСЕ уровни (min_severity='hint') и без сворачивания по размеру:
+      lines    — '2660-2781' | '10-20,35' (1-based, включительно); цель — ОДИН файл
+                 (модуль 'Тип.Х.МодульОбъекта', форма, path к файлу, снипет);
+      function — имя метода или несколько через запятую; границы — от директив (&НаСервере)
+                 до КонецПроцедуры/КонецФункции; ищется во всех модулях цели.
+
     Возвращает объект:
       {"diagnostics": [<Diagnostic>...],            # показанные, по убыванию severity
        "suppressed": {"total": N, "by_code": [{"code","severity","count"}...]},
@@ -223,9 +284,10 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
                            "| path (каталог/файл вне корпуса) | text (снипет кода)")
 
     if min_severity is None:
-        # снипет мал — показываем ВСЁ (hint/info тоже полезны: длина строк, пробелы);
-        # модуль/путь (могут быть сотни диагностик) — прежний порог warning.
-        min_severity = "hint" if text is not None else "warning"
+        # снипет и зона правок малы — показываем ВСЁ (hint/info тоже полезны: длина строк,
+        # пробелы); модуль/путь целиком (сотни диагностик) — прежний порог warning.
+        zoned = lines is not None or function is not None
+        min_severity = "hint" if text is not None or zoned else "warning"
 
     only_file: Path | None = None
     tmp_dir: Path | None = None
@@ -253,6 +315,25 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
             raise ResolveError(f"не найден каталог модуля {module_full_name!r}")
         src_dir, fallback = target.src_dir, module_full_name
 
+    # Зона правок: файлы цели → диапазоны строк (до выбора источника — ошибка адреса раньше)
+    scope: dict[str, list[tuple[int, int]]] | None = None
+    zone: dict | None = None
+    if lines is not None or function is not None:
+        try:
+            if text is not None:
+                zone_files = [tmp_dir / "snippet.bsl"]
+            elif module_full_name is not None and target.files is not None:
+                zone_files = list(target.files)
+            elif only_file is not None:
+                zone_files = [only_file]
+            else:
+                zone_files = sorted(src_dir.rglob("*.bsl"))
+            scope, zone = _scope(zone_files, lines, function)
+        except ResolveError:
+            if tmp_dir is not None:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+
     # Код корпуса — из тёплого LSP (контекст конфигурации), если он готов.
     note: str | None = None
     if text is None and (module_full_name is not None or _in_workspace(deps, src_dir)):
@@ -267,12 +348,12 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
             note = f"файлов больше {deps.settings.diag_lsp_max_files} — пакетный analyze"
         elif engine == "lsp":
             try:
-                raw = await _lsp_raw(deps, files)
+                raw = _apply_scope(await _lsp_raw(deps, files), scope)
                 new = [f.name for f in files if deps.lsp.is_new(f.resolve().as_uri())]
                 if new:
                     note = ("файл создан после индексации — метаданные его объекта сервер не знает "
                             "(проверки, зависящие от типа модуля, неполны); полный контекст — после bsl_reindex")
-                return _finish(deps, raw, src_dir, fallback, None, code, min_severity, "lsp", note)
+                return _finish(deps, raw, src_dir, fallback, None, code, min_severity, "lsp", note, zone)
             except (asyncio.TimeoutError, ConnectionError, RuntimeError) as exc:
                 note = f"LSP не ответил ({type(exc).__name__}) — пакетный analyze"
         elif deps.settings.diag_engine == "auto" and deps.lsp is not None:
@@ -294,12 +375,13 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
             raw = [{**d, "_src_uri": mirror.get(_uri_key(d.get("_src_uri", "")), d.get("_src_uri", ""))}
                    for d in raw]
             src_dir = target.src_dir
+        raw = _apply_scope(raw, scope)   # пока копии и снипет на месте (ключи — раскрытые пути)
     finally:
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
     if only_file is not None:
         raw = [d for d in raw if _same_file(d.get("_src_uri", ""), only_file)]
-    return _finish(deps, raw, src_dir, fallback, text, code, min_severity, "analyze", note)
+    return _finish(deps, raw, src_dir, fallback, text, code, min_severity, "analyze", note, zone)
 
 
 def _override_severity(items: list, overrides: tuple[tuple[str, str], ...]) -> tuple[list, list[dict]]:
@@ -322,9 +404,12 @@ def _override_severity(items: list, overrides: tuple[tuple[str, str], ...]) -> t
 
 
 def _finish(deps: Deps, raw: list[dict], src_dir: Path, fallback: str, text: str | None,
-            code: str | None, min_severity: str, engine: str, note: str | None) -> dict:
+            code: str | None, min_severity: str, engine: str, note: str | None,
+            zone: dict | None = None) -> dict:
     """Записи диагностик → ответ: подписи, порог, сворачивание по размеру, источник."""
     source = {"движок": engine, **({"примечание": note} if note else {})}
+    if zone:
+        source["фильтр"] = zone
     ws = deps.settings.workspace
     if text is not None:      # снипет: все диагностики под одной подписью '<snippet>'
         items = [mapper.analyze_diagnostic_to_model(fallback, d) for d in raw]
@@ -351,7 +436,7 @@ def _finish(deps: Deps, raw: list[dict], src_dir: Path, fallback: str, text: str
     # (warning) в сводку, ошибки оставляем всегда. Если и одни ошибки за бюджетом —
     # отдаём как есть (ошибки важнее лимита).
     folded_by_size = False
-    if len(json.dumps([asdict(m) for m in shown], ensure_ascii=False)) > deps.settings.diag_max_chars:
+    if zone is None and len(json.dumps([asdict(m) for m in shown], ensure_ascii=False)) > deps.settings.diag_max_chars:
         non_err = [m for m in shown if m.severity != "error"]
         if non_err:
             shown = [m for m in shown if m.severity == "error"]
