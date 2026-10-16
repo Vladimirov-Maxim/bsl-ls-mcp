@@ -44,6 +44,29 @@ LANGUAGE_LITERALS: tuple[str, ...] = ("Истина", "Ложь", "Неопре�
 
 MAX_PARAMS = 5
 
+# Свойства управляемой формы примитивного типа — Булево, Строка, Число (ФормаКлиентскогоПриложения,
+# документация платформы через EDT, 16.10.2026). Необъявленное имя с таким названием в модуле формы —
+# свойство формы, а не новая переменная: `Доступность = Новый Структура` пишет в форму (ЗИ-45).
+# Объектные свойства (Элементы, Параметры, ТекущийЭлемент…) не входят: обращение к ним через точку
+# штатно и признаком переменной не служит.
+FORM_PROPERTIES: tuple[str, ...] = (
+    "ПроверятьЗаполнениеАвтоматически", "АвтоЗаголовок", "АвтоНавигационнаяСсылка", "ЗакрыватьПриВыборе",
+    "ЗакрыватьПриЗакрытииВладельца", "ЗаголовокГруппыКнопокСоздания", "Доступность", "ИмяФормы", "Высота",
+    "МодальныйРежим", "Модифицированность", "КлючНазначенияИспользования", "ТолькоПросмотр",
+    "СохраняемыеВНастройкахДанныеМодифицированы", "Масштаб", "ОтображатьКнопкуЗакрытия",
+    "ОтображатьКоманднуюПанель", "ОтображатьЗаголовок", "Заголовок", "НавигационнаяСсылка", "Ширина",
+    "КлючСохраненияПоложенияОкна",
+)
+
+# Клиентские события поля формы, в которых платформа запрещает серверные методы формы с
+# директивой &НаСервере («Расширение поля формы для поля ввода», раздел «Примечание»; ЗИ-35).
+# Оба написания — как в описании формы (EDT/конфигуратор: англ.) и в УстановитьДействие (рус.).
+NO_SERVER_EVENTS: tuple[str, ...] = (
+    "НачалоВыбора", "StartChoice",
+    "НачалоВыбораИзСписка", "StartListChoice",
+    "ИзменениеТекстаРедактирования", "EditTextChange",
+)
+
 
 @dataclass(frozen=True)
 class Knowledge:
@@ -56,6 +79,8 @@ class Knowledge:
     exchange_guarded_handlers: tuple[str, ...] = EXCHANGE_GUARDED_HANDLERS
     internal_api_region: str = INTERNAL_API_REGION
     language_literals: tuple[str, ...] = LANGUAGE_LITERALS
+    form_properties: tuple[str, ...] = FORM_PROPERTIES
+    no_server_events: tuple[str, ...] = NO_SERVER_EVENTS
     _compiled: dict = field(default_factory=dict, compare=False, repr=False, init=False)
 
     # Ключи раздела `настройки` реестра → поле. Всё необязательное.
@@ -65,6 +90,8 @@ class Knowledge:
         "чтение_базы": "db_read",
         "запись_базы": "db_write",
         "диалоги": "dialogs",
+        "свойства_формы": "form_properties",
+        "события_без_серверных_вызовов": "no_server_events",
     }
 
     def with_settings(self, settings: dict) -> tuple[Knowledge, list[str]]:
@@ -76,7 +103,7 @@ class Knowledge:
             if key not in settings:
                 continue
             value = settings[key]
-            if attr in ("prefixes", "global_names", "dialogs"):
+            if attr in ("prefixes", "global_names", "dialogs", "form_properties", "no_server_events"):
                 if isinstance(value, str):
                     value = (value,)
                 if not (isinstance(value, (list, tuple)) and all(isinstance(v, str) and v for v in value)):

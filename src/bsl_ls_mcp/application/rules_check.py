@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from ..domain.checks.bsl_line import split_text
 from ..domain.checks.bsl_module import ModuleModel
+from ..domain.checks import form_events
 from ..domain.checks.engine import FileUnderCheck, check_files, own_modules, task_methods
 from ..domain.checks.findings import finish
 from ..domain.checks.module_names import common_module_paths, module_label
@@ -75,8 +76,17 @@ def run_rules_check(source: ChangeSource, registry: dict | None, *,
             cache[key] = ModuleModel(split_text(text)) if text is not None else None
         return cache[key]
 
+    def form_handlers(path: str) -> dict[str, set[str]]:
+        if not form_events.is_form_module(path):
+            return {}
+        for form_path in form_events.form_files_for(path):
+            text = source.new_text(form_path)
+            if text is not None:
+                return form_events.handlers_from_form(text)
+        return {}
+
     findings = check_files(files, rules, own=own_modules((c.status, c.path) for c in changes),
-                           common_module=common_module)
+                           common_module=common_module, form_handlers=form_handlers)
     result = finish(findings, list(rules.exceptions), list(rules.problems))
     base = getattr(source, "base_info", None)
     if base:
