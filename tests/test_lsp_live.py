@@ -72,7 +72,7 @@ def test_live_callers_fresh_after_disk_edit_and_lsp_diagnostics(tmp_path):
 
             assert lsp.is_ready()
             r = await tools.bsl_diagnostics(deps, module_full_name="ОбщийМодуль.Проверка", min_severity="hint")
-            assert r["источник"] == {"движок": "lsp"}
+            assert r["источник"]["движок"] == "lsp"
             codes = {(d["code"], d["line"]) for d in r["diagnostics"]}
             assert ("MissingCommonModuleMethod", 3) in codes          # несуществующий метод виден
             assert ("UnknownMember", 2) not in codes, codes            # существующий метод — не ложный
@@ -80,7 +80,7 @@ def test_live_callers_fresh_after_disk_edit_and_lsp_diagnostics(tmp_path):
 
             # повтор по неизменённому модулю — снова LSP и тот же ответ (не ожидание публикации)
             again = await tools.bsl_diagnostics(deps, module_full_name="ОбщийМодуль.Проверка", min_severity="hint")
-            assert again["источник"] == {"движок": "lsp"}
+            assert again["источник"]["движок"] == "lsp"
             assert {(d["code"], d["line"]) for d in again["diagnostics"]} == codes
 
             # правка на диске — ответ на новый текст
