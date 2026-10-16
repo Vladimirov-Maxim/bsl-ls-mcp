@@ -177,6 +177,7 @@ bsl-ls-mcp --transport streamable-http --port 8081   # → http://127.0.0.1:8081
 | `BSL_CONFIG` | — | путь к `.bsl-language-server.json`: набор диагностик для analyze (`-c`) и для LSP (`-Dapp.configuration.path` — `-c` LSP-режим 1.0.x игнорирует) |
 | `BSL_DIAG_ENGINE` | `auto` | источник `bsl_diagnostics` для кода корпуса: `auto` — LSP при готовом индексе, иначе analyze + прогрев; `lsp` — всегда LSP (ждать индекс); `analyze` — всегда analyze |
 | `BSL_DIAG_LSP_MAX_FILES` | `200` | больше файлов в цели (каталог по `path`) — analyze |
+| `BSL_SEVERITY_OVERRIDES` | `UnknownMember=info` | переназначить уровни диагностик: `Код=error\|warning\|info\|hint;…`; `-` — без переназначений; что переназначено, ответ называет в `источник.переназначено` |
 | `BSL_FRESHNESS` | `1` | сообщать серверу о правках `.bsl` на диске перед запросами; `0` — выкл |
 | `BSL_FRESH_MIN_INTERVAL` | `2` | проверка правок — не чаще раза в N c |
 | `BSL_FRESH_SCAN_SEC` | `30` | без git: обход дерева по mtime — не чаще раза в N c |
@@ -336,9 +337,15 @@ portable Temurin JRE 21 в `jre\` и раскомментировать `BSL_JAV
 конфигурации, пока индекс строится — `analyze` (примечание это называет); код вне workspace и
 `text` — всегда `analyze`. `BSL_DIAG_ENGINE=analyze|lsp` фиксирует источник; ошибка или
 тайм-аут LSP — переход на `analyze` с примечанием, а не «замечаний нет».
-**`UnknownMember` не гейт** ни в одном источнике: BSL LS 1.0.7 не разрешает поля выборок
-запроса, реквизиты регистров из `.mdo` EDT и др. — ложных срабатываний много (замер на
-`bf_edt`). Поддерживает **модули форм**:
+**Переназначение уровней** (`BSL_SEVERITY_OVERRIDES`, по умолчанию `UnknownMember=info`):
+`UnknownMember` BSL LS 1.0.7 выдаёт уровнем `error`, но не разрешает поля выборок запроса,
+ключи структур, реквизиты регистров из `.mdo` EDT — на `bf_edt` все проверенные срабатывания
+ложные, а в списке ошибок модуля их было до 95 %. Обёртка понижает её до `info`: из списка
+ошибок она уходит в `suppressed`, через `code="UnknownMember"` видна целиком, а ответ называет
+переназначение в `источник.переназначено` (`[{код, было, стало, число}]`). Замер на четырёх
+модулях: error 55→3, 193→28, 15→0, 12→6 — остались содержательные (`CreateQueryInCycle`,
+`WrongUseOfRollbackTransactionMethod`, `ServerSideExportFormMethod`, `ParseError`…).
+Поддерживает **модули форм**:
 `Тип.Объект.Форма.ИмяФормы` (каноничное 4-частное) и `…Форма.ИмяФормы.Форма` (5-частное) —
 резолвятся в папку формы `Forms/ИмяФормы/Ext/Form`, а не в `ManagerModule`.
 

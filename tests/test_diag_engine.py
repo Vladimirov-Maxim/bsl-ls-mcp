@@ -11,8 +11,8 @@ MOD = WS / "CommonModules" / "ТестОбщийМодуль" / "Ext" / "Module.
 LSP_DIAG = [{"range": {"start": {"line": 2}}, "code": "MissingCommonModuleMethod", "severity": 1,
              "message": "Метод X общего модуля Y не существует"},
             {"range": {"start": {"line": 5}}, "code": "LineLength", "severity": 3, "message": "длинно"}]
-ANALYZE_RAW = [{"range": {"start": {"line": 0}}, "code": "UnknownMember", "severity": "Error",
-                "message": "ложное", "_src_uri": MOD.resolve().as_uri()}]
+ANALYZE_RAW = [{"range": {"start": {"line": 0}}, "code": "ParseError", "severity": "Error",
+                "message": "ошибка разбора", "_src_uri": MOD.resolve().as_uri()}]
 
 
 def _run(lsp, analyzer, engine="auto", **kw):
@@ -36,7 +36,7 @@ def test_index_building_falls_back_to_analyze_and_warms_up():
     r = _run(lsp, fa, module_full_name="ОбщийМодуль.ТестОбщийМодуль")
     assert r["источник"]["движок"] == "analyze" and "индекс строится" in r["источник"]["примечание"]
     assert lsp.warmed == 1 and lsp.diag_uris == []
-    assert [d["code"] for d in r["diagnostics"]] == ["UnknownMember"]
+    assert [d["code"] for d in r["diagnostics"]] == ["ParseError"]
 
 
 def test_engine_analyze_keeps_previous_behaviour():
@@ -52,7 +52,7 @@ def test_lsp_timeout_is_not_reported_as_clean():
     fa = FakeAnalyzer(ANALYZE_RAW)
     r = _run(Slow(ready=True), fa, module_full_name="ОбщийМодуль.ТестОбщийМодуль")
     assert r["источник"]["движок"] == "analyze" and "LSP не ответил" in r["источник"]["примечание"]
-    assert [d["code"] for d in r["diagnostics"]] == ["UnknownMember"]
+    assert [d["code"] for d in r["diagnostics"]] == ["ParseError"]
 
 
 def test_path_inside_workspace_uses_lsp_for_that_file_only():
@@ -77,3 +77,38 @@ def test_too_many_files_go_to_analyze():
                                       module_full_name="ОбщийМодуль.ТестОбщийМодуль"))
     assert r["источник"]["движок"] == "analyze" and "файлов больше" in r["источник"]["примечание"]
     assert s_lsp.diag_uris == []
+
+
+def test_unknown_member_is_lowered_and_named_in_source():
+    """UnknownMember по умолчанию — info: уходит из списка ошибок в suppressed, но видна
+    через code=, и ответ называет переназначение."""
+    raw = [{"range": {"start": {"line": 3}}, "code": "UnknownMember", "severity": "Error",
+            "message": "у типа нет свойства", "_src_uri": MOD.resolve().as_uri()},
+           {"range": {"start": {"line": 4}}, "code": "ParseError", "severity": "Error",
+            "message": "ошибка разбора", "_src_uri": MOD.resolve().as_uri()}]
+    r = _run(FakeLsp(ready=False), FakeAnalyzer(raw), module_full_name="ОбщийМодуль.ТестОбщийМодуль")
+    assert [d["code"] for d in r["diagnostics"]] == ["ParseError"]
+    assert r["suppressed"]["by_code"] == [{"code": "UnknownMember", "severity": "info", "count": 1}]
+    assert r["источник"]["переназначено"] == [{"код": "UnknownMember", "было": "error", "стало": "info", "число": 1}]
+    drill = _run(FakeLsp(ready=False), FakeAnalyzer(raw), module_full_name="ОбщийМодуль.ТестОбщийМодуль",
+                 code="UnknownMember")
+    assert [(d["code"], d["severity"]) for d in drill["diagnostics"]] == [("UnknownMember", "info")]
+
+
+def test_overrides_from_settings_and_disabled():
+    from bsl_ls_mcp.settings import parse_severity_overrides
+    assert parse_severity_overrides("UnknownMember=info; LineLength = hint") == (
+        ("UnknownMember", "info"), ("LineLength", "hint"))
+    assert parse_severity_overrides("-") == () and parse_severity_overrides("") == ()
+    try:
+        parse_severity_overrides("UnknownMember=никак")
+        assert False, "ожидали ValueError"
+    except ValueError:
+        pass
+    raw = [{"range": {"start": {"line": 3}}, "code": "UnknownMember", "severity": "Error",
+            "message": "m", "_src_uri": MOD.resolve().as_uri()}]
+    s = dataclasses.replace(_settings(), severity_overrides=(), diag_engine="analyze")
+    r = asyncio.run(T.bsl_diagnostics(T.Deps(lsp=None, analyzer=FakeAnalyzer(raw), settings=s),
+                                      module_full_name="ОбщийМодуль.ТестОбщийМодуль"))
+    assert [(d["code"], d["severity"]) for d in r["diagnostics"]] == [("UnknownMember", "error")]
+    assert "переназначено" not in r["источник"]

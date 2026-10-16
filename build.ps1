@@ -118,6 +118,6 @@ Write-Host "[build] DONE: $bundle" -ForegroundColor Green
 Write-Host "For a machine WITHOUT Java: put portable Temurin JRE 21 into $bundle\jre\"
 Write-Host "  (https://adoptium.net/temurin/releases/?version=21, Windows x64 JRE .zip,"
 Write-Host "   so that $bundle\jre\bin\java.exe exists). run.cmd picks it up automatically;"
-Write-Host "   otherwise run.cmd falls back to system 'java' (need 17+)."
+Write-Host "   otherwise run.cmd falls back to system 'java' (need 21+)."
 Write-Host "Verify:  $bundle\run.cmd --selftest     (prints [selftest] OK)"
 Write-Host "Daemon:  $bundle\run.cmd                (streamable-http on :8081/mcp)"

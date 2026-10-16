@@ -7,7 +7,7 @@ import json
 import shutil
 import tempfile
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from ..domain import mapper, resolver
@@ -273,6 +273,25 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
     return _finish(deps, raw, src_dir, fallback, text, code, min_severity, "analyze", note)
 
 
+def _override_severity(items: list, overrides: tuple[tuple[str, str], ...]) -> tuple[list, list[dict]]:
+    """Переназначить уровни по настройке (BSL_SEVERITY_OVERRIDES) — до порога и сворачивания.
+    Возвращает новые записи и сводку для ответа: что, с какого уровня, на какой, сколько."""
+    if not overrides:
+        return items, []
+    target = dict(overrides)
+    counts: Counter = Counter()
+    out = []
+    for m in items:
+        level = target.get(m.code)
+        if level is not None and level != m.severity:
+            counts[(m.code, m.severity, level)] += 1
+            m = replace(m, severity=level)
+        out.append(m)
+    changed = [{"код": c, "было": was, "стало": now, "число": n}
+               for (c, was, now), n in sorted(counts.items())]
+    return out, changed
+
+
 def _finish(deps: Deps, raw: list[dict], src_dir: Path, fallback: str, text: str | None,
             code: str | None, min_severity: str, engine: str, note: str | None) -> dict:
     """Записи диагностик → ответ: подписи, порог, сворачивание по размеру, источник."""
@@ -283,6 +302,9 @@ def _finish(deps: Deps, raw: list[dict], src_dir: Path, fallback: str, text: str
     else:
         items = [mapper.analyze_diagnostic_to_model(_diag_label(ws, src_dir, d, fallback), d)
                  for d in raw]
+    items, changed = _override_severity(items, deps.settings.severity_overrides)
+    if changed:
+        source["переназначено"] = changed
 
     # Drill-down: явный запрос по коду → все совпавшие, без отсева по severity и размеру.
     if code is not None:

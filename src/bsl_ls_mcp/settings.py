@@ -15,6 +15,29 @@ from pathlib import Path
 # Версия BSL Language Server, под которую собрана обёртка (jar в server/, build.ps1).
 BSL_LS_VERSION = "1.0.7"
 
+# Уровни диагностик, которые обёртка переназначает по умолчанию (BSL_SEVERITY_OVERRIDES).
+# UnknownMember BSL LS 1.0.7 — error, но ложных срабатываний много в любом источнике: поля
+# выборок запроса, ключи структур, реквизиты регистров из .mdo EDT (замер на bf_edt: все
+# проверенные — ложные). На уровне error она ломает гейт «ноль error» и прячет настоящие
+# ошибки; на info видна в suppressed и через code="UnknownMember".
+DEFAULT_SEVERITY_OVERRIDES = "UnknownMember=info"
+_LEVELS = {"error", "warning", "info", "hint"}
+
+
+def parse_severity_overrides(raw: str) -> tuple[tuple[str, str], ...]:
+    """'Код=уровень;Код2=уровень' → ((код, уровень), …). Пусто или '-' — без переназначений."""
+    out = []
+    for part in (raw or "").replace(",", ";").split(";"):
+        part = part.strip()
+        if not part or part == "-":
+            continue
+        code, sep, level = part.partition("=")
+        level = level.strip().lower()
+        if not sep or not code.strip() or level not in _LEVELS:
+            raise ValueError(f"BSL_SEVERITY_OVERRIDES: ожидалось 'Код=error|warning|info|hint', получено {part!r}")
+        out.append((code.strip(), level))
+    return tuple(out)
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -77,6 +100,9 @@ class Settings:
     fresh_min_interval: float = 2.0 # BSL_FRESH_MIN_INTERVAL: проверка правок — не чаще раза в N c
     fresh_open_limit: int = 300     # BSL_FRESH_OPEN_LIMIT: сколько изменённых файлов за раз отдавать
                                     # текстом (didOpen/didChange); сверх — didChangeWatchedFiles
+    severity_overrides: tuple[tuple[str, str], ...] = (("UnknownMember", "info"),)
+                                    # BSL_SEVERITY_OVERRIDES: 'Код=уровень;…' — переназначить уровень
+                                    # диагностики (называется в ответе); '-' — без переназначений
 
     @staticmethod
     def from_env() -> "Settings":
@@ -128,6 +154,8 @@ class Settings:
             fresh_scan_sec=float(os.environ.get("BSL_FRESH_SCAN_SEC", "30")),
             fresh_min_interval=float(os.environ.get("BSL_FRESH_MIN_INTERVAL", "2")),
             fresh_open_limit=int(os.environ.get("BSL_FRESH_OPEN_LIMIT", "300")),
+            severity_overrides=parse_severity_overrides(
+                os.environ.get("BSL_SEVERITY_OVERRIDES", DEFAULT_SEVERITY_OVERRIDES)),
         )
 
 
