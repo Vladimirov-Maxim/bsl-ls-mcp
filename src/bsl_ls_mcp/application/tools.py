@@ -10,9 +10,10 @@ from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
-from ..domain import mapper, resolver
+from ..domain import mapper, resolver, string_calls
+from ..domain.checks.bsl_line import split_text
 from ..domain.models import Complexity
-from ..domain.ports import CodeAnalyzer, LspServer
+from ..domain.ports import CodeAnalyzer, LspServer, TextSearch
 from ..settings import Settings
 
 
@@ -21,6 +22,7 @@ class Deps:
     lsp: LspServer          # навигация по тёплому индексу (callers/references/...)
     analyzer: CodeAnalyzer  # проверка кода (diagnostics) — пофайлово, без индекса
     settings: Settings
+    search: TextSearch | None = None   # вызовы по строковому имени (bsl_callers)
 
 
 class ResolveError(RuntimeError):
@@ -47,13 +49,40 @@ async def _prepare_item(deps: Deps, full_name: str) -> dict | None:
 
 
 async def bsl_callers(deps: Deps, full_name: str) -> list[dict]:
-    """Кто вызывает функцию (incoming). Анализ влияния «кто вызовет мою правку»."""
+    """Кто вызывает функцию: граф LSP («вызов») + вызовы по строковому имени («строка»).
+    Анализ влияния «кто вызовет мою правку»."""
     item = await _prepare_item(deps, full_name)
-    if item is None:
+    out: list[dict] = []
+    if item is not None:
+        incoming = await deps.lsp.incoming_calls(item)
+        out = [{**asdict(mapper.call_hierarchy_item_to_ref(c["from"])), "способ": "вызов"}
+               for c in incoming if "from" in c]
+    return out + await _string_callers(deps, full_name)
+
+
+async def _string_callers(deps: Deps, full_name: str) -> list[dict]:
+    """Вызывающие по строковому литералу имени метода (ЗИ-34): одна запись на объемлющий
+    метод, со списком строк. Кандидаты — файлы, где встречается «Метод"»."""
+    names = string_calls.literal_names(full_name)
+    if not names or deps.search is None:
         return []
-    incoming = await deps.lsp.incoming_calls(item)
-    refs = [mapper.call_hierarchy_item_to_ref(c["from"]) for c in incoming if "from" in c]
-    return [asdict(r) for r in refs]
+    method = full_name.rsplit(".", 1)[1]
+    files = await asyncio.to_thread(deps.search.files_with, f'{method}"')
+    found: dict[str, dict] = {}
+    for path, text in files:
+        calls = string_calls.find_string_calls(split_text(text), names)
+        if not calls:
+            continue
+        type_ru, module = mapper.module_address_from_uri(path.resolve().as_uri())
+        for c in calls:
+            name = c.method or "<тело модуля>"
+            key = f"{type_ru}.{module}.{name}"
+            entry = found.setdefault(key, {
+                "name": name, "type": type_ru, "full_name": key,
+                "kind": {"Функция": "function", "Процедура": "procedure"}.get(c.kind or "", "module"),
+                "способ": "строка", "строки": []})
+            entry["строки"].append(c.line)
+    return sorted(found.values(), key=lambda e: e["full_name"])
 
 
 async def bsl_callees(deps: Deps, full_name: str) -> list[dict]:

@@ -42,6 +42,11 @@ def _type_and_module_from_uri(uri: str) -> tuple[str, str]:
     return "?", "?"
 
 
+def module_address_from_uri(uri: str) -> tuple[str, str]:
+    """Вид и адрес модуля по URI файла: ('ОбщийМодуль', 'М'), ('Справочник', 'Х.Форма.Ф')."""
+    return _type_and_module_from_uri(uri)
+
+
 def find_symbol_position(symbols: list[dict[str, Any]], name: str) -> tuple[int, int] | None:
     """Позиция объявления символа в дереве documentSymbol (DocumentSymbol —
     с children/selectionRange; либо плоский SymbolInformation — location).

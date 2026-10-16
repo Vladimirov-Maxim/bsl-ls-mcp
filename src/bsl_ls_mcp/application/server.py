@@ -16,7 +16,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from ..bootstrap import build_analyzer, build_change_source, build_lsp, load_rules
+from ..bootstrap import build_analyzer, build_change_source, build_lsp, build_search, load_rules
 from ..domain import resolver
 from ..settings import get_settings
 from . import tools
@@ -54,7 +54,7 @@ _sem = asyncio.Semaphore(_s.max_concurrency)
 
 # Навигация — одна живая LSP-сессия (тёплый индекс). Проверка кода — отдельный
 # analyze-CLI (разовый java, своя очередь). Два пути, один jar (см. CodeAnalyzer).
-_deps = Deps(lsp=build_lsp(_s), analyzer=build_analyzer(_s), settings=_s)
+_deps = Deps(lsp=build_lsp(_s), analyzer=build_analyzer(_s), settings=_s, search=build_search(_s))
 
 # При остановке демона — синхронно прибить java (иначе остаётся осиротевшим).
 atexit.register(lambda: _deps.lsp.kill())
@@ -66,7 +66,11 @@ def _d() -> Deps:
 
 @mcp.tool()
 async def bsl_callers(full_name: str) -> list[dict]:
-    """Кто вызывает функцию (incoming calls). full_name: 'ОбщийМодуль.МойМодуль.ИмяФункции'."""
+    """Кто вызывает функцию. full_name: 'ОбщийМодуль.МойМодуль.ИмяФункции'.
+    [{name, type, full_name, kind, способ}]: способ "вызов" — граф LSP (Модуль.Метод(...));
+    "строка" — имя метода строковым литералом ("Модуль.Метод" для ДлительныеОперации,
+    ВыполнитьМетодКонфигурации, в переменной…), такие записи несут "строки" (номера); граф
+    их не видит. Литерал сравнивается целиком без учёта регистра; комментарии не в счёт."""
     async with _sem:
         return await tools.bsl_callers(_d(), full_name)
 

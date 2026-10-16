@@ -110,7 +110,7 @@ def _deps(lsp=None, analyzer=None):
 def test_callers_maps_incoming():
     r = asyncio.run(T.bsl_callers(_deps(), "ОбщийМодуль.ТестОбщийМодуль.ВычислитьСумму"))
     assert r == [{"name": "Обработать", "type": "ОбщийМодуль",
-                  "full_name": "ОбщийМодуль.Вызыватель.Обработать", "kind": "function"}]
+                  "full_name": "ОбщийМодуль.Вызыватель.Обработать", "kind": "function", "способ": "вызов"}]
 
 
 def test_callees_maps_outgoing():
