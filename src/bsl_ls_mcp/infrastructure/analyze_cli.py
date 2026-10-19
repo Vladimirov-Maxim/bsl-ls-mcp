@@ -52,9 +52,16 @@ class AnalyzeCliRunner:
             if not report.exists():
                 return []
             data = json.loads(report.read_text(encoding="utf-8"))
-            # прокидываем источник (mdoRef — чистый URI файла) для точной подписи модуля
+            # прокидываем источник для точной подписи модуля: mdoRef вне конфигурации —
+            # чистый URI файла, а у объекта конфигурации — ссылка 'DataProcessor.X.Form.Y'
+            # (несколько модулей на одну ссылку) — тогда путь файла
             return [
-                {**d, "_src_uri": fi.get("mdoRef") or fi.get("path", "")}
+                {**d, "_src_uri": _source_uri(fi)}
                 for fi in data.get("fileinfos", [])
                 for d in fi.get("diagnostics", [])
             ]
+
+
+def _source_uri(fi: dict[str, Any]) -> str:
+    ref = fi.get("mdoRef") or ""
+    return ref if ref.startswith("file:") else (fi.get("path") or ref)

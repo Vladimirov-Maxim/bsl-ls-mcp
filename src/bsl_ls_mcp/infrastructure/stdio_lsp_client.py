@@ -504,6 +504,17 @@ class StdioLspClient:
         (тип модуля неизвестен) до bsl_reindex."""
         return _norm_uri(uri) in self._created
 
+    async def close(self, uri: str, forget: bool = False) -> None:
+        """Закрыть документ (didClose). forget — ещё и «файл удалён» (didChangeWatchedFiles):
+        одного didClose BSL LS мало, документ вне workspace остаётся в графе вызовов
+        (проверено на 1.0.7). Для файла, открытого на время одного запроса."""
+        async with self._doc_lock:
+            entry = self._open_docs.pop(_norm_uri(uri), None)
+        if entry is not None:
+            await self.notify("textDocument/didClose", {"textDocument": {"uri": entry[0]}})
+        if forget:
+            await self.notify("workspace/didChangeWatchedFiles", {"changes": [{"uri": uri, "type": 3}]})
+
     async def prepare_call_hierarchy(self, uri: str, line: int, character: int) -> list[dict]:
         await self._fresh()
         return await self.request("textDocument/prepareCallHierarchy", {

@@ -131,11 +131,15 @@ async def bsl_references(full_name: str) -> list[dict]:
 
 
 @mcp.tool()
-async def bsl_complexity(module_full_name: str, function: str | None = None) -> list[dict]:
+async def bsl_complexity(module_full_name: str | None = None, function: str | None = None,
+                         path: str | None = None) -> list[dict]:
     """Сложность методов модуля (когнитивная + цикломатическая). Метрика ревьюеру.
-    module_full_name: 'ОбщийМодуль.МойМодуль'; function (опц.) — только этот метод."""
+    РОВНО ОДИН адрес: module_full_name — 'ОбщийМодуль.МойМодуль' | 'Отчет.Х' (все модули
+    объекта) | форма; ИЛИ path — любой локальный .bsl или каталог: внешняя обработка,
+    расширение тестов, выгрузка ревизии MR (full_name — имя модуля 1С, где его можно
+    определить, иначе путь от path). function (опц.) — только этот метод."""
     async with _sem:
-        return await tools.bsl_complexity(_d(), module_full_name, function)
+        return await tools.bsl_complexity(_d(), module_full_name, function, path)
 
 
 @mcp.tool()

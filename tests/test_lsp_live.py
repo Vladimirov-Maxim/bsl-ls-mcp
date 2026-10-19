@@ -111,3 +111,75 @@ def test_live_callers_fresh_after_disk_edit_and_lsp_diagnostics(tmp_path):
         asyncio.run(scenario())
     finally:
         shutil.rmtree(ws, ignore_errors=True)
+
+
+def test_live_complexity_outside_workspace_leaves_no_trace(tmp_path):
+    """bsl_complexity(path=…) вне workspace (ЗИ-17): числа из линз, а документ после запроса
+    не остаётся в графе вызовов (одного didClose BSL LS мало)."""
+    ws = _workspace(tmp_path)
+    outside = tmp_path / "ревизия" / "Module.bsl"
+    outside.parent.mkdir()
+    outside.write_text("Процедура Внешний() Экспорт\n\tЕсли Истина Тогда\n\t\tПоставщик.Метод();\n"
+                       "\tКонецЕсли;\nКонецПроцедуры\n", encoding="utf-8")
+    s = dataclasses.replace(get_settings(), workspace=ws, allowed_roots=(ws,), java_path=_JAVA, xmx="2g",
+                            status_file=tmp_path / "status.json", fresh_min_interval=0, fresh_scan_sec=0)
+    lsp = StdioLspClient(s)
+    deps = tools.Deps(lsp=lsp, analyzer=None, settings=s)
+
+    async def scenario():
+        try:
+            r = await tools.bsl_complexity(deps, path=str(outside.parent))
+            assert r == [{"full_name": "Module.Внешний", "cognitive": 1, "cyclomatic": 2}]
+            callers = await tools.bsl_callers(deps, "ОбщийМодуль.Поставщик.Метод")
+            assert [c["full_name"] for c in callers] == ["ОбщийМодуль.Проверка.Проверить"]
+        finally:
+            await lsp.stop()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+
+
+_MD = ('<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" '
+       'xmlns:xs="http://www.w3.org/2001/XMLSchema" version="2.17">')
+
+
+def test_live_external_processing_form_attributes_visible(tmp_path):
+    """Внешняя обработка вне workspace (ЗИ-70): без описания формы реквизит `Счетчик` —
+    «неиспользуемая локальная переменная», обработчик `ПриОткрытии` — «неиспользуемый метод»;
+    в обёртке-конфигурации BSL LS читает Form.xml и ложных замечаний нет."""
+    from bsl_ls_mcp.infrastructure.analyze_cli import AnalyzeCliRunner
+
+    root = tmp_path / "Реализация"
+    obj = root / "Обр"
+    (obj / "Ext").mkdir(parents=True)
+    (root / "Обр.xml").write_text(
+        f'<?xml version="1.0" encoding="UTF-8"?>\n{_MD}\n<ExternalDataProcessor uuid="{uuid.uuid4()}">\n'
+        "<Properties><Name>Обр</Name><DefaultForm>ExternalDataProcessor.Обр.Form.Форма</DefaultForm></Properties>\n"
+        "<ChildObjects><Form>Форма</Form></ChildObjects>\n</ExternalDataProcessor>\n</MetaDataObject>\n",
+        encoding="utf-8")
+    (obj / "Ext" / "ObjectModule.bsl").write_text("Процедура П() Экспорт\nКонецПроцедуры\n", encoding="utf-8")
+    form_dir = obj / "Forms" / "Форма" / "Ext"
+    (form_dir / "Form").mkdir(parents=True)
+    (obj / "Forms" / "Форма.xml").write_text(
+        f'<?xml version="1.0" encoding="UTF-8"?>\n{_MD}\n<Form uuid="{uuid.uuid4()}">\n'
+        "<Properties><Name>Форма</Name><FormType>Managed</FormType></Properties>\n</Form>\n</MetaDataObject>\n",
+        encoding="utf-8")
+    (form_dir / "Form.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" '
+        'xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" version="2.17">\n'
+        '<Events><Event name="OnOpen">ПриОткрытии</Event></Events>\n<Attributes><Attribute name="Счетчик" id="1">'
+        "<Type><v8:Type>xs:decimal</v8:Type></Type></Attribute></Attributes>\n</Form>\n", encoding="utf-8")
+    module = form_dir / "Form" / "Module.bsl"
+    module.write_text("&НаКлиенте\nПроцедура ПриОткрытии(Отказ)\n\tСчетчик = 1;\nКонецПроцедуры\n", encoding="utf-8")
+    s = dataclasses.replace(get_settings(), java_path=_JAVA)
+    deps = tools.Deps(lsp=None, analyzer=AnalyzeCliRunner(s), settings=s)
+
+    bare = {(d["code"], d["range"]["start"]["line"] + 1) for d in asyncio.run(deps.analyzer.analyze(module.parent))}
+    assert {("UnusedLocalVariable", 3), ("UnusedLocalMethod", 2)} <= bare      # ЗИ-70 воспроизводится
+    r = asyncio.run(tools.bsl_diagnostics(deps, path=str(module), min_severity="hint"))
+    got = {(d["code"], d["line"]) for d in r["diagnostics"]}
+    assert not any(c.startswith("UnusedLocal") for c, _ in got), got
+    assert {d["file"] for d in r["diagnostics"]} <= {"ВнешняяОбработка.Обр.Форма.Форма"}
+    assert "обёртке-конфигурации" in r["источник"]["примечание"]
