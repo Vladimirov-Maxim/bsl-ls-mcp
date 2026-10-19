@@ -15,6 +15,7 @@ from ..domain.checks.bsl_line import split_text
 from ..domain.models import Complexity
 from ..domain.ports import CodeAnalyzer, LspServer, TextSearch
 from ..settings import Settings
+from . import external_wrap
 
 
 @dataclass
@@ -106,11 +107,24 @@ def _same_file(uri: str, target: Path) -> bool:
         return False
 
 
+def _under(uri: str, root: Path) -> bool:
+    """Файл диагностики — сам root или лежит под ним (root раскрыт)."""
+    try:
+        f = mapper.uri_to_path(uri).resolve()
+    except (ValueError, OSError):
+        return False
+    return f == root or root in f.parents
+
+
+def _join_note(note: str | None, extra: str) -> str:
+    return f"{note}; {extra}" if note else extra
+
+
 def _diag_label(workspace: Path, src_dir: Path, d: dict, fallback: str) -> str:
     """Подпись file: точное имя 1С по пути (если файл в корпусе), иначе — путь
     относительно srcDir (внешние обработки вне корпуса), иначе — fallback."""
     uri = d.get("_src_uri", "")
-    label = mapper.analyze_label_from_uri(workspace, uri)
+    label = d.get("_label") or mapper.analyze_label_from_uri(workspace, uri)
     if label:
         return label
     try:
@@ -361,24 +375,47 @@ async def bsl_diagnostics(deps: Deps, module_full_name: str | None = None,
             note = ("индекс строится — пакетный analyze без контекста конфигурации: "
                     "UnknownMember на её объектах может быть ложным")
 
+    analyze_dir, external = src_dir, None
     if module_full_name is not None and target.files is not None:
         # Объект EDT: модули лежат рядом с Forms/ и Commands/ — отдаём analyze только
         # их, копией с тем же путём от корня, и возвращаем подписи к исходным файлам.
         tmp_dir = Path(tempfile.mkdtemp(prefix="bsl_obj_"))
         mirror = _mirror(deps.settings.workspace, target.files, tmp_dir)
-        src_dir = tmp_dir
+        analyze_dir = tmp_dir
+    elif path is not None and not _in_workspace(deps, src_dir):
+        # Внешняя обработка/отчёт: без описания формы реквизиты выглядят необъявленными
+        # переменными, обработчики — неиспользуемыми методами (ЗИ-70). Объект целиком
+        # оборачивается во временную конфигурацию, ответ — по запрошенному пути.
+        external = external_wrap.find_external(Path(path))
+        if external is not None:
+            tmp_dir = Path(tempfile.mkdtemp(prefix="bsl_ext_"))
+            try:
+                mirror = external_wrap.wrap(external, tmp_dir)
+            except OSError as exc:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                tmp_dir, external, mirror = None, None, {}
+                note = _join_note(note, f"обёртка внешнего объекта не собрана ({exc}) — без описания форм")
+            else:
+                analyze_dir = tmp_dir
+                note = _join_note(note, f"{external.kind.type_ru}.{external.name} проверена в обёртке-конфигурации: "
+                                        "описание форм и реквизиты видны")
 
     # Проверка кода — через analyze-CLI (разовый java, без тёплого индекса).
     try:
-        raw = await deps.analyzer.analyze(src_dir)
+        raw = await deps.analyzer.analyze(analyze_dir)
         if mirror:   # пока копии на месте: resolve() несуществующего пути не раскрыл бы 8.3-имена
             raw = [{**d, "_src_uri": mirror.get(_uri_key(d.get("_src_uri", "")), d.get("_src_uri", ""))}
                    for d in raw]
-            src_dir = target.src_dir
+            if external is None:
+                src_dir = target.src_dir
         raw = _apply_scope(raw, scope)   # пока копии и снипет на месте (ключи — раскрытые пути)
     finally:
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+    if external is not None:
+        under = Path(path).resolve()
+        raw = [{**d, "_label": external.label(mapper.uri_to_path(d.get("_src_uri", "")))}
+               for d in raw if _under(d.get("_src_uri", ""), under)]
     if only_file is not None:
         raw = [d for d in raw if _same_file(d.get("_src_uri", ""), only_file)]
     return _finish(deps, raw, src_dir, fallback, text, code, min_severity, "analyze", note, zone)
@@ -493,13 +530,23 @@ async def bsl_references(deps: Deps, full_name: str) -> list[dict]:
     return list(await asyncio.gather(*(asyncio.to_thread(_code_loc, loc) for loc in locs)))
 
 
-async def bsl_complexity(deps: Deps, module_full_name: str,
-                         function: str | None = None) -> list[dict]:
+async def bsl_complexity(deps: Deps, module_full_name: str | None = None,
+                         function: str | None = None, path: str | None = None) -> list[dict]:
     """Когнитивная и цикломатическая сложность методов модуля (метрика ревьюеру).
-    module_full_name: 'ОбщийМодуль.МойМодуль' | 'Отчет.Х' (все модули объекта — менеджер,
-    объект…; full_name тогда несёт модуль: 'Отчет.Х.МодульОбъекта.Метод') | форма/конкретный
-    модуль; function (опц.) — только этот метод (без учёта регистра).
-    Числа берутся из code lens сложности (textDocument/codeLens + codeLens/resolve)."""
+    РОВНО ОДИН адрес:
+      module_full_name — 'ОбщийМодуль.МойМодуль' | 'Отчет.Х' (все модули объекта — менеджер,
+                         объект…; full_name тогда несёт модуль: 'Отчет.Х.МодульОбъекта.Метод') |
+                         форма/конкретный модуль;
+      path             — любой локальный .bsl или каталог (все .bsl под ним): внешняя обработка,
+                         расширение тестов, выгрузка ревизии MR. full_name — имя модуля 1С, если
+                         путь в корпусе или во внешней обработке/отчёте, иначе путь от path.
+    function (опц.) — только этот метод (без учёта регистра).
+    Числа берутся из code lens сложности (textDocument/codeLens + codeLens/resolve); файл вне
+    workspace открывается на сервере только на время запроса."""
+    if (module_full_name is None) == (path is None):
+        raise ResolveError("укажите РОВНО ОДИН адрес: module_full_name (модуль корпуса) | path (файл/каталог)")
+    if path is not None:
+        return await _complexity_by_path(deps, Path(path), function)
     if module_full_name.count(".") < 1:
         raise ResolveError("ожидался формат Тип.Модуль, напр. 'ОбщийМодуль.МойМодуль'")
     ws = deps.settings.workspace
@@ -513,6 +560,35 @@ async def bsl_complexity(deps: Deps, module_full_name: str,
         if len(uris) > 1:   # несколько модулей объекта — адрес каждого (МодульОбъекта/…)
             prefix = mapper.analyze_label_from_uri(ws, uri) or module_full_name
         out += await _complexity_of(deps, uri, prefix, function)
+    return out
+
+
+async def _complexity_by_path(deps: Deps, p: Path, function: str | None) -> list[dict]:
+    if not resolver.is_local_path(p):
+        raise ResolveError(f"UNC-пути (\\\\host\\share) запрещены: {str(p)!r}")
+    if not p.exists():
+        raise ResolveError(f"путь не найден: {str(p)!r}")
+    files = [p] if p.is_file() else sorted(p.rglob("*.bsl"))
+    if not files:
+        raise ResolveError(f"в {str(p)!r} нет .bsl")
+    limit = deps.settings.diag_lsp_max_files
+    if len(files) > limit:
+        raise ResolveError(f"файлов .bsl {len(files)} — больше {limit}; укажите каталог модуля или файл")
+    ws = deps.settings.workspace
+    external = None if _in_workspace(deps, p if p.is_dir() else p.parent) else external_wrap.find_external(p)
+    base = p if p.is_dir() else p.parent
+    out: list[dict] = []
+    for f in files:
+        uri = f.resolve().as_uri()
+        inside = _in_workspace(deps, f.parent)
+        label = ((mapper.analyze_label_from_uri(ws, uri) if inside else None)
+                 or (external.label(f) if external is not None else None)
+                 or f.resolve().relative_to(base.resolve()).with_suffix("").as_posix())
+        try:
+            out += await _complexity_of(deps, uri, label, function)
+        finally:
+            if not inside:
+                await deps.lsp.close(uri, forget=True)
     return out
 
 
