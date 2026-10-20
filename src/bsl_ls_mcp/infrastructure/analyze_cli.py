@@ -40,7 +40,7 @@ class AnalyzeCliRunner:
             ]
             if self._s.bsl_config:
                 args += ["-c", str(self._s.bsl_config)]
-            subprocess.run(
+            proc = subprocess.run(
                 args, timeout=self._s.analyze_timeout, creationflags=_NOWIN,
                 # cwd = каталог исходников: analyze резолвит путь файла относительно
                 # рабочего каталога; если srcDir на ДРУГОМ диске, чем cwd процесса,
@@ -50,7 +50,8 @@ class AnalyzeCliRunner:
             )
             report = Path(out) / "bsl-json.json"
             if not report.exists():
-                return []
+                # не «замечаний нет»: java не стартовал, упал или не уложился в память
+                raise RuntimeError(f"analyze не создал отчёт (код возврата {proc.returncode})")
             data = json.loads(report.read_text(encoding="utf-8"))
             # прокидываем источник для точной подписи модуля: mdoRef вне конфигурации —
             # чистый URI файла, а у объекта конфигурации — ссылка 'DataProcessor.X.Form.Y'

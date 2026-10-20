@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..domain import external_objects as eo
+from ..domain.task_project import DEFAULT_PMF
 
 _TEXT_SUFFIXES = {".xml", ".mdo", ".form"}
 _MAX_UP = 8          # на сколько уровней вверх от пути искать корень объекта
@@ -62,10 +63,14 @@ def wrap(ext: ExternalObject, tmp_dir: Path) -> dict[str, str]:
     """Развернуть в tmp_dir конфигурацию с одним объектом — копией внешнего. Возвращает
     отображение копий модулей на URI исходных файлов."""
     kind = ext.kind
-    target = tmp_dir / kind.config_dir / ext.name
+    # EDT: analyze распознаёт проект только с DT-INF/PROJECT.PMF и исходниками в src/
+    src = tmp_dir / "src" if kind.edt else tmp_dir
+    target = src / kind.config_dir / ext.name
     if kind.edt:
-        (tmp_dir / "Configuration").mkdir(parents=True)
-        (tmp_dir / "Configuration" / "Configuration.mdo").write_text(
+        (tmp_dir / "DT-INF").mkdir(parents=True)
+        (tmp_dir / "DT-INF" / "PROJECT.PMF").write_text(DEFAULT_PMF, encoding="utf-8")
+        (src / "Configuration").mkdir(parents=True)
+        (src / "Configuration" / "Configuration.mdo").write_text(
             eo.edt_configuration(ext.name, kind), encoding="utf-8")
     else:
         root_text = ext.description.read_text(encoding="utf-8-sig", errors="replace")

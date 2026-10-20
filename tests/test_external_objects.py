@@ -86,11 +86,12 @@ def test_find_and_wrap_edt(tmp_path):
     out = tmp_path / "wrap"
     out.mkdir()
     external_wrap.wrap(ext, out)
+    assert (out / "DT-INF" / "PROJECT.PMF").is_file()          # без него analyze не видит проект EDT
     assert "<dataProcessors>DataProcessor.Обр</dataProcessors>" in (
-        out / "Configuration" / "Configuration.mdo").read_text(encoding="utf-8")
-    assert "<mdclass:DataProcessor " in (out / "DataProcessors" / "Обр" / "Обр.mdo").read_text(encoding="utf-8")
-    assert "DataProcessorObject.Обр" in (out / "DataProcessors" / "Обр" / "Forms" / "Форма" / "Form.form"
-                                         ).read_text(encoding="utf-8")
+        out / "src" / "Configuration" / "Configuration.mdo").read_text(encoding="utf-8")
+    obj_out = out / "src" / "DataProcessors" / "Обр"
+    assert "<mdclass:DataProcessor " in (obj_out / "Обр.mdo").read_text(encoding="utf-8")
+    assert "DataProcessorObject.Обр" in (obj_out / "Forms" / "Форма" / "Form.form").read_text(encoding="utf-8")
 
 
 class WrapAnalyzer(FakeAnalyzer):

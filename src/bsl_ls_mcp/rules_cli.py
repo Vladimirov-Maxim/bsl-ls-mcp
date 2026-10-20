@@ -5,30 +5,39 @@
         [--rules <реестр.json>] [--only 13.6 13.7] [--paths <путь> ...] [--json] [--out <файл>]
     bsl-ls-mcp rules-check --baseline <эталон> --target <копия> ...
     bsl-ls-mcp task-methods --repo <выгрузка> [--base ...] [--json]
+    bsl-ls-mcp diagnostics --repo <выгрузка> [--base ...] [--rev ...] [--rules <реестр.json>] [--json]
 
-Код возврата rules-check: 0 — нарушений нет (предупреждения допустимы), 1 — есть
+diagnostics — диагностики BSL LS (гейт Г1) по модулям задачи: только строки задачи, error →
+Fail, warning → Warn, `ид` — код диагностики; исключения — из реестра (`--rules`/BSL_RULES).
+
+Код возврата rules-check и diagnostics: 0 — нарушений нет (предупреждения допустимы), 1 — есть
 нарушения уровня Fail, 2 — ошибка входа (репозиторий, база, реестр).
 С MCP-каналом этот модуль не знаком: общее у них — только сценарий."""
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
+from .application.diagnostics_check import run_diagnostics_check
 from .application.rules_check import InputError, run_rules_check, run_task_methods, source_kind
-from .bootstrap import build_change_source, load_rules
+from .bootstrap import build_analyzer, build_change_source, load_rules
+from .domain.checks.registry import ruleset_from_registry
 from .domain.ports import SourceError
 from .settings import get_settings
 
-COMMANDS = ("rules-check", "task-methods")
+COMMANDS = ("rules-check", "task-methods", "diagnostics")
 
 
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="bsl-ls-mcp", description="Проверки кода задачи по правилам проекта.")
     sub = p.add_subparsers(dest="command", required=True)
     for name, help_text in (("rules-check", "правила проекта над правками задачи"),
-                            ("task-methods", "новые и изменённые методы задачи")):
+                            ("task-methods", "новые и изменённые методы задачи"),
+                            ("diagnostics", "диагностики BSL LS по строкам задачи (гейт Г1)")):
         s = sub.add_parser(name, help=help_text)
         s.add_argument("--repo", help="git-репозиторий выгрузки конфигурации")
         s.add_argument("--base", default=None,
@@ -40,8 +49,13 @@ def _parser() -> argparse.ArgumentParser:
         s.add_argument("--paths-file", help="файл со списком путей задачи, по одному в строке")
         s.add_argument("--json", action="store_true", help="машинный вывод (JSON)")
         s.add_argument("--out", help="записать JSON в файл (UTF-8), а не в консоль")
+        if name in ("rules-check", "diagnostics"):
+            s.add_argument("--rules", help="реестр правил проекта (JSON); по умолчанию BSL_RULES"
+                                           + (" — для diagnostics только исключения" if name == "diagnostics" else ""))
+        if name == "diagnostics":
+            s.add_argument("--bsl-config", help="конфиг BSL LS (.bsl-language-server.json) — набор диагностик "
+                                                "гейта; по умолчанию BSL_CONFIG")
         if name == "rules-check":
-            s.add_argument("--rules", help="реестр правил проекта (JSON); по умолчанию BSL_RULES")
             s.add_argument("--only", nargs="*", default=None, help="только эти ид правил")
     return p
 
@@ -82,6 +96,14 @@ def main(argv: list[str]) -> int:
         paths = _paths(args)
         if args.command == "rules-check":
             result = run_rules_check(source, load_rules(settings, args.rules), paths=paths, only=args.only)
+        elif args.command == "diagnostics":
+            registry = load_rules(settings, args.rules)
+            exceptions = list(ruleset_from_registry(registry).exceptions) if registry is not None else []
+            if args.bsl_config:
+                settings = replace(settings, bsl_config=Path(args.bsl_config))
+            result = asyncio.run(run_diagnostics_check(
+                source, build_analyzer(settings), paths=paths,
+                severity_overrides=settings.severity_overrides, exceptions=exceptions))
         else:
             result = run_task_methods(source, paths=paths)
     except (InputError, SourceError, OSError) as exc:
@@ -94,13 +116,13 @@ def main(argv: list[str]) -> int:
             Path(args.out).write_bytes(text.encode("utf-8"))
         else:
             print(text)
-    elif args.command == "rules-check":
+    elif args.command in ("rules-check", "diagnostics"):
         _print_findings(result)
     else:
         for m in result:
             print(f"{m['статус']:8} {m['модуль']}.{m['метод']} ({m['вид']}"
                   f"{', экспорт' if m['экспорт'] else ''}) {m['файл']}:{m['строки'][0]}-{m['строки'][1]}")
 
-    if args.command == "rules-check":
+    if args.command in ("rules-check", "diagnostics"):
         return 1 if any(f["уровень"] == "Fail" for f in result["находки"]) else 0
     return 0

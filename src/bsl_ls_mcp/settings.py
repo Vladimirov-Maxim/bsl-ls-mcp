@@ -113,6 +113,9 @@ class Settings:
         else:
             base = Path(__file__).resolve().parents[2]  # .../bsl-ls-mcp
         default_jar = base / "server" / f"bsl-language-server-{BSL_LS_VERSION}-exec.jar"
+        # Java 21 из бандла (jre/ рядом) — запуск из исходников без BSL_JAVA (командная строка
+        # конвейера) не должен упираться в системную Java 17.
+        bundled_java = base / "jre" / "bin" / ("java.exe" if sys.platform == "win32" else "java")
         cfg = os.environ.get("BSL_CONFIG")
         log = os.environ.get("BSL_SERVER_LOG")
         # Статус-файл в ProgramData — единый путь для службы (LocalSystem) и трея (юзер).
@@ -129,7 +132,7 @@ class Settings:
             bsl_config=Path(cfg) if cfg else None,
             server_log=Path(log) if log else None,
             status_file=Path(status),
-            java_path=os.environ.get("BSL_JAVA", "java"),
+            java_path=os.environ.get("BSL_JAVA") or (str(bundled_java) if bundled_java.is_file() else "java"),
             xmx=os.environ.get("BSL_XMX", "14g"),
             mcp_transport=os.environ.get("BSL_MCP_TRANSPORT", "stdio"),
             mcp_host=os.environ.get("BSL_MCP_HOST", "127.0.0.1"),
