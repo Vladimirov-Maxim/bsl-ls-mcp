@@ -1,6 +1,6 @@
 """Проект EDT наряду с выгрузкой конфигуратора: раскладка модулей, резолв имён,
 цель диагностик, подписи и проверки правок задачи в репозитории, где конфигурация
-лежит не в корне (`BF/src/`). Без java: анализатор подменён."""
+лежит не в корне (`App/src/`). Без java: анализатор подменён."""
 from __future__ import annotations
 
 import asyncio
@@ -121,10 +121,10 @@ def test_diagnostics_object_mirror_maps_back(ws):
 
 # ---------- проверки правок задачи: репозиторий EDT ----------
 def _edt_repo(tmp_path: Path) -> Path:
-    repo = tmp_path / "bf_edt"
+    repo = tmp_path / "edt_repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "develop")
-    src = "BF/src/"
+    src = "App/src/"
     write(repo, src + "Configuration/Configuration.mdo", ["<mdclass:Configuration/>"], eol="\n")
     write(repo, src + "CommonModules/Вендорский/Вендорский.mdo", ["<mdclass:CommonModule/>"], eol="\n")
     write(repo, src + "CommonModules/Вендорский/Module.bsl", [
@@ -137,27 +137,27 @@ def _edt_repo(tmp_path: Path) -> Path:
 
 def test_config_prefixes(tmp_path):
     repo = _edt_repo(tmp_path)
-    assert config_prefixes(repo) == ("BF/src/",)
+    assert config_prefixes(repo) == ("App/src/",)
     plain = tmp_path / "plain"
     (plain / "x").mkdir(parents=True)
     assert config_prefixes(plain) == ("",)
 
 
 def test_names_under_prefix():
-    assert module_label("BF/src/Documents/Заказ/ObjectModule.bsl") == "Документ.Заказ.МодульОбъекта"
-    assert module_label("BF/src/Catalogs/Спр/Forms/Ф/Module.bsl") == "Справочник.Спр.Форма.Ф"
-    assert module_label("BF/src/CommonModules/М/Module.bsl") == "ОбщийМодуль.М"
-    assert common_module_paths("М", ("BF/src/",)) == [
-        "BF/src/CommonModules/М/Ext/Module.bsl", "BF/src/CommonModules/М/Module.bsl"]
-    assert own_modules([("A", "BF/src/CommonModules/Новый/Новый.mdo"), ("A", "CommonModules/Старый.xml"),
-                        ("A", "BF/src/CommonModules/Новый/Module.bsl"), ("M", "CommonModules/Б/Б.mdo")]) == \
+    assert module_label("App/src/Documents/Заказ/ObjectModule.bsl") == "Документ.Заказ.МодульОбъекта"
+    assert module_label("App/src/Catalogs/Спр/Forms/Ф/Module.bsl") == "Справочник.Спр.Форма.Ф"
+    assert module_label("App/src/CommonModules/М/Module.bsl") == "ОбщийМодуль.М"
+    assert common_module_paths("М", ("App/src/",)) == [
+        "App/src/CommonModules/М/Ext/Module.bsl", "App/src/CommonModules/М/Module.bsl"]
+    assert own_modules([("A", "App/src/CommonModules/Новый/Новый.mdo"), ("A", "CommonModules/Старый.xml"),
+                        ("A", "App/src/CommonModules/Новый/Module.bsl"), ("M", "CommonModules/Б/Б.mdo")]) == \
         frozenset({"новый", "старый"})
 
 
 def test_rules_check_in_edt_repo(tmp_path):
     repo = _edt_repo(tmp_path)
     git(repo, "checkout", "-q", "-b", "feature/T-1")
-    src = "BF/src/"
+    src = "App/src/"
     write(repo, src + "CommonModules/СвойНовый/СвойНовый.mdo", ["<mdclass:CommonModule/>"], eol="\n")
     write(repo, src + "CommonModules/СвойНовый/Module.bsl", [
         "#Область СлужебныйПрограммныйИнтерфейс", "Функция Своя() Экспорт", "\tВозврат 3;", "КонецФункции",

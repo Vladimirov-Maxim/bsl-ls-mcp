@@ -198,8 +198,8 @@ def test_live_cli_diagnostics_task_lines_with_form_context(tmp_path):
     repo = tmp_path / "edt"
     repo.mkdir()
     git(repo, "init", "-q")
-    src = "BF/src/"
-    write(repo, "BF/DT-INF/PROJECT.PMF", ["Manifest-Version: 1.0", "Runtime-Version: 8.3.24"], eol="\n")
+    src = "App/src/"
+    write(repo, "App/DT-INF/PROJECT.PMF", ["Manifest-Version: 1.0", "Runtime-Version: 8.3.24"], eol="\n")
     write(repo, src + "Configuration/Configuration.mdo", [
         '<?xml version="1.0" encoding="UTF-8"?>', f'<mdclass:Configuration {NS} uuid="{uuid.uuid4()}">',
         "  <name>Проба</name>", "  <scriptVariant>Russian</scriptVariant>",

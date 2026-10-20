@@ -24,7 +24,7 @@ _EDT_EXTERNAL_DIRS = {"externaldataprocessors": "ExternalDataProcessor", "extern
 
 @dataclass(frozen=True)
 class Project:
-    """Один мини-проект: корень конфигурации в репозитории (`prefix`, напр. 'BF/src/'), формат и —
+    """Один мини-проект: корень конфигурации в репозитории (`prefix`, напр. 'App/src/'), формат и —
     для внешнего объекта без конфигурации — его вид и имя."""
     prefix: str
     fmt: str                                   # EDT | DESIGNER

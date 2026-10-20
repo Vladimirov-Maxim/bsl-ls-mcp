@@ -29,11 +29,11 @@ def _repo(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "develop")
-    ws = repo / "BF" / "src"
-    write(repo, "BF/src/Configuration/Configuration.mdo", ["<mdclass:Configuration/>"], eol="\n")
-    write(repo, "BF/src/CommonModules/А/Module.bsl", ["Процедура П()", "КонецПроцедуры"], eol="\n")
-    write(repo, "BF/src/CommonModules/Б/Module.bsl", ["Процедура Б()", "КонецПроцедуры"], eol="\n")
-    write(repo, "BF/src/CommonModules/Грязный/Module.bsl", ["Процедура Г()", "КонецПроцедуры"], eol="\n")
+    ws = repo / "App" / "src"
+    write(repo, "App/src/Configuration/Configuration.mdo", ["<mdclass:Configuration/>"], eol="\n")
+    write(repo, "App/src/CommonModules/А/Module.bsl", ["Процедура П()", "КонецПроцедуры"], eol="\n")
+    write(repo, "App/src/CommonModules/Б/Module.bsl", ["Процедура Б()", "КонецПроцедуры"], eol="\n")
+    write(repo, "App/src/CommonModules/Грязный/Module.bsl", ["Процедура Г()", "КонецПроцедуры"], eol="\n")
     write(repo, "Вне/Module.bsl", ["Процедура В()", "КонецПроцедуры"], eol="\n")
     commit(repo)
     return repo, ws
@@ -57,7 +57,7 @@ def test_git_mode_reports_changes_after_baseline(tmp_path):
                                         ("CommonModules/Новый/Module.bsl", CREATED)]
     assert ch.changes() == []                           # уже сообщено — второй раз не шлём
 
-    git(repo, "checkout", "-q", "--", "BF/src/CommonModules/Грязный/Module.bsl")   # вернули к HEAD
+    git(repo, "checkout", "-q", "--", "App/src/CommonModules/Грязный/Module.bsl")   # вернули к HEAD
     assert _kinds(ch.changes(), ws) == [("CommonModules/Грязный/Module.bsl", CHANGED)]
 
 

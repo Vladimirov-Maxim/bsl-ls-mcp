@@ -1,7 +1,7 @@
 """Путь модуля в исходниках ↔ имя 1С. Оба формата: выгрузка конфигуратора
 (`<Вид>/<Объект>/Ext/<Модуль>.bsl`, формы — `…/Forms/<Форма>/Ext/Form/Module.bsl`) и
 проект EDT (`<Вид>/<Объект>/<Модуль>.bsl`, формы — `…/Forms/<Форма>/Module.bsl`).
-Путь может начинаться с префикса до корня конфигурации (`BF/src/…` в репозитории EDT)."""
+Путь может начинаться с префикса до корня конфигурации (`App/src/…` в репозитории EDT)."""
 from __future__ import annotations
 
 from ..one_c_config_path import _OBJECT_TYPE_MAP
@@ -18,7 +18,7 @@ _MODULE_KIND_RU = {
 
 def common_module_paths(name: str, prefixes: tuple[str, ...] = ("",)) -> list[str]:
     """Возможные пути модуля общего модуля: под каждым корнем конфигурации, в обоих
-    форматах (сначала конфигуратор, затем EDT). Префикс — '' или 'BF/src/'."""
+    форматах (сначала конфигуратор, затем EDT). Префикс — '' или 'App/src/'."""
     return [f"{p}CommonModules/{name}/{tail}" for p in prefixes for tail in ("Ext/Module.bsl", "Module.bsl")]
 
 
@@ -29,7 +29,7 @@ def common_module_path(name: str) -> str:
 
 def module_label(path: str) -> str:
     """'Documents/Заказ/Ext/ObjectModule.bsl' → 'Документ.Заказ.МодульОбъекта'
-    (так же 'BF/src/Documents/Заказ/ObjectModule.bsl'). Нераспознанный путь
+    (так же 'App/src/Documents/Заказ/ObjectModule.bsl'). Нераспознанный путь
     (внешняя обработка, глобальный модуль) — сам путь."""
     all_parts = path.split("/")
     start = next((i for i, part in enumerate(all_parts) if part in _OBJECT_TYPE_MAP), None)
