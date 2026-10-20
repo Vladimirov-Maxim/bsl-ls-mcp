@@ -98,3 +98,50 @@ def test_events_list_from_registry_settings(tmp_path):
     reg = registry(settings={"события_без_серверных_вызовов": ["OnChange"]})
     found = hits(run_rules_check(GitChangeSource(repo, "HEAD"), reg), "form.server-call-in-client-event")
     assert [n for _, n, _ in found] == [22]
+
+
+BASE6 = ["&НаКлиенте", "Процедура ПолеНачалоВыбора(Элемент, ДанныеВыбора, СтандартнаяОбработка)",
+         "\tСтароеНаСервере();", "\tПомочь();", "КонецПроцедуры", "",
+         "&НаКлиенте", "Процедура Помочь()", "КонецПроцедуры", "",
+         "&НаСервере", "Процедура СтароеНаСервере()", "КонецПроцедуры", "",
+         "&НаСервере", "Процедура НовоеНаСервере()", "КонецПроцедуры"]
+
+
+def _bsl6(tmp_path, new_lines):
+    repo = new_repo(tmp_path)
+    write(repo, "Catalogs/Спр/Forms/ФормаЭлемента/Ext/Form.xml",
+          ['<Events><Event name="StartChoice">ПолеНачалоВыбора</Event></Events>'], eol="\n")
+    write(repo, FORM_D, BASE6)
+    commit(repo)
+    write(repo, FORM_D, new_lines)
+    return [(n, t.split(": ", 1)[1]) for _, n, t in _check(repo, "form.server-call-in-client-event")]
+
+
+def test_server_call_existing_in_touched_handler_is_not_task(tmp_path):
+    """BSL-6: задача тронула обработчик, но серверного вызова не добавила — находки нет."""
+    touched = BASE6[:3] + ["\tА = 1;"] + BASE6[3:]
+    assert _bsl6(tmp_path, touched) == []
+
+
+def test_server_call_added_deep_in_client_chain(tmp_path):
+    """Серверный вызов добавлен во вспомогательный клиентский метод — находка на нём,
+    прежний вызов обработчика — контекстом."""
+    deep = BASE6[:8] + ["\tНовоеНаСервере();"] + BASE6[8:]
+    assert _bsl6(tmp_path, deep) == [
+        (9, "событие StartChoice: ПолеНачалоВыбора → Помочь → НовоеНаСервере (&НаСервере); "
+            "серверные вызовы в существующем коде обработчика — строки 3")]
+
+
+def test_server_call_added_in_handler(tmp_path):
+    direct = BASE6[:4] + ["\tНовоеНаСервере();"] + BASE6[4:]
+    assert _bsl6(tmp_path, direct) == [
+        (5, "событие StartChoice: ПолеНачалоВыбора → НовоеНаСервере (&НаСервере); "
+            "серверные вызовы в существующем коде обработчика — строки 3")]
+
+
+def test_server_call_method_made_server_by_task(tmp_path):
+    """Правка задачи сделала клиентский метод серверным — находка на вызове из обработчика."""
+    flipped = BASE6[:6] + ["&НаСервере"] + BASE6[7:]
+    assert _bsl6(tmp_path, flipped) == [
+        (4, "событие StartChoice: ПолеНачалоВыбора → Помочь (&НаСервере); "
+            "серверные вызовы в существующем коде обработчика — строки 3")]

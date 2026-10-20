@@ -487,7 +487,12 @@ def _directive(ctx: FileContext, m: Method) -> str:
 def _server_call_in_client_event(ctx: FileContext) -> Iterator[Hit]:
     """Обработчик события, где платформа запрещает серверные методы формы (НачалоВыбора и др.),
     прямо или через свои клиентские методы вызывает метод с &НаСервере. Синтаксически валидно,
-    поэтому не ловят ни диагностика, ни синтакс-контроль (ЗИ-35)."""
+    поэтому не ловят ни диагностика, ни синтакс-контроль (ЗИ-35).
+
+    Вменяется только добавленное задачей (BSL-6, как [13.9]): находка — на строке вызова из
+    правки задачи — в самом обработчике или глубже по клиентской цепочке; серверные вызовы,
+    которые в обработчике уже были, — контекстом в тексте находки. Обработчик, где задача
+    ничего серверного не добавила, находки не даёт, даже если он тронут."""
     if not form_events.is_form_module(ctx.path):
         return
     banned = {e.casefold() for e in ctx.knowledge.no_server_events}
@@ -498,32 +503,71 @@ def _server_call_in_client_event(ctx: FileContext) -> Iterator[Hit]:
         body = ctx.model.body(m)
         calls[key] = [(n, c.group(1).casefold()) for n in m.body_lines()
                       for c in form_events.CALL.finditer(body.code[n]) if c.group(1).casefold() in methods]
-    for m in ctx.touched:
-        events = sorted(e for e in handlers.get(m.name.casefold(), ()) if e.casefold() in banned)
+    for key, m in methods.items():
+        events = sorted(e for e in handlers.get(key, ()) if e.casefold() in banned)
         if not events:
             continue
-        for line, callee in calls.get(m.name.casefold(), []):
-            chain = _server_chain(ctx, methods, calls, callee, {m.name.casefold()})
-            if chain:
-                path = " → ".join(methods[c].name for c in chain)
-                yield Hit(line, f"событие {', '.join(events)}: {m.name} → {path} (&НаСервере)")
+        added: list[tuple[int, list[str]]] = []      # (строка правки задачи, цепочка)
+        existing: list[int] = []                     # строки обработчика с прежним серверным вызовом
+        for line, callee in calls.get(key, []):
+            path = _server_path(ctx, methods, calls, line, callee, {key})
+            if path is None:
+                continue
+            task_line = next((n for n, _ in path if n in ctx.mask), None)
+            if task_line is None and _directive_line(ctx, methods[path[-1][1]]) in ctx.mask:
+                task_line = path[-1][0]              # метод стал серверным правкой задачи
+            if task_line is None:
+                existing.append(line)
+            else:
+                added.append((task_line, [c for _, c in path]))
+        context = (f"; серверные вызовы в существующем коде обработчика — строки "
+                   f"{', '.join(str(n) for n in sorted(set(existing)))}") if existing else ""
+        for task_line, chain in added:
+            path = " → ".join(methods[c].name for c in chain)
+            yield Hit(task_line, f"событие {', '.join(events)}: {m.name} → {path} (&НаСервере){context}")
 
 
-def _server_chain(ctx, methods, calls, start, seen) -> list[str] | None:
-    """Путь от start до серверного метода формы через клиентские (без повторов)."""
-    if start in seen:
+_MAX_PATHS = 200                     # предел перебора цепочек от одного вызова
+
+
+def _server_path(ctx, methods, calls, line, start, seen) -> list[tuple[int, str]] | None:
+    """Цепочка [(строка вызова, вызванный метод), …] от вызова на строке line до серверного метода
+    формы через клиентские, без повторов. Из нескольких цепочек — первая, где есть строка правки
+    задачи, иначе первая найденная."""
+    first: list[tuple[int, str]] | None = None
+    budget = [_MAX_PATHS]
+
+    def walk(n, key, seen, acc):
+        nonlocal first
+        if key in seen or budget[0] <= 0:
+            return None
+        acc = acc + [(n, key)]
+        d = _directive(ctx, methods[key])
+        if d == "&насервере":
+            budget[0] -= 1
+            if any(x in ctx.mask for x, _ in acc):
+                return acc
+            first = first or acc
+            return None
+        if d != "&наклиенте":
+            return None                  # БезКонтекста/КлиентСервер — не контекстный серверный вызов
+        for n2, callee in calls.get(key, []):
+            found = walk(n2, callee, seen | {key}, acc)
+            if found:
+                return found
         return None
-    seen = seen | {start}
-    d = _directive(ctx, methods[start])
-    if d == "&насервере":
-        return [start]
-    if d != "&наклиенте":
-        return None                      # БезКонтекста/КлиентСервер — не контекстный серверный вызов
-    for _, callee in calls.get(start, []):
-        tail = _server_chain(ctx, methods, calls, callee, seen)
-        if tail:
-            return [start] + tail
-    return None
+
+    return walk(line, start, seen, []) or first
+
+
+def _directive_line(ctx: FileContext, m: Method) -> int:
+    """Строка директивы компиляции метода (или объявления, если директивы нет)."""
+    n = m.start - 1
+    while n >= 1 and ctx.model.lines[n - 1].lstrip().startswith("&"):
+        if ctx.model.lines[n - 1].strip().split("(")[0].casefold().startswith("&на"):
+            return n
+        n -= 1
+    return m.start
 
 
 # ---------------------------------------------------------------------------
