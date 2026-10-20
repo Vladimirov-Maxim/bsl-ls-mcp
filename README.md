@@ -156,8 +156,11 @@ bsl-ls-mcp --transport streamable-http --port 8081     # → http://127.0.0.1:80
 ```powershell
 bsl-ls-mcp rules-check --repo C:\1c\src\cf --base <коммит-до-задачи> --rules правила.json --json
 bsl-ls-mcp task-methods --repo C:\1c\src\cf --base <коммит-до-задачи>
+bsl-ls-mcp diagnostics --repo C:\1c\src\cf --base <коммит-до-задачи> --bsl-config .bsl-language-server.json --json
 ```
-Код возврата `rules-check`: 0 — нарушений уровня Fail нет, 1 — есть, 2 — ошибка входа.
+`diagnostics` — диагностики BSL LS (error → Fail, warning → Warn) только по строкам задачи, в том же
+формате, что `rules-check`: гейт «ноль error» для хука и бенчмарка без демона.
+Код возврата `rules-check` и `diagnostics`: 0 — нарушений уровня Fail нет, 1 — есть, 2 — ошибка входа.
 
 ## Поведение
 

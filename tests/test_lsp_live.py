@@ -183,3 +183,82 @@ def test_live_external_processing_form_attributes_visible(tmp_path):
     assert not any(c.startswith("UnusedLocal") for c, _ in got), got
     assert {d["file"] for d in r["diagnostics"]} <= {"ВнешняяОбработка.Обр.Форма.Форма"}
     assert "обёртке-конфигурации" in r["источник"]["примечание"]
+
+
+def test_live_cli_diagnostics_task_lines_with_form_context(tmp_path):
+    """`bsl-ls-mcp diagnostics` (BSL-8) на настоящем BSL LS: проект EDT из модулей задачи и описаний —
+    реквизит формы не «неиспользуемая переменная», тип общего модуля известен
+    (ExecuteExternalCodeInCommonModule), находки только на строках задачи."""
+    import json
+    import subprocess
+    import sys
+
+    from checks_support import commit, git, write
+
+    repo = tmp_path / "edt"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    src = "BF/src/"
+    write(repo, "BF/DT-INF/PROJECT.PMF", ["Manifest-Version: 1.0", "Runtime-Version: 8.3.24"], eol="\n")
+    write(repo, src + "Configuration/Configuration.mdo", [
+        '<?xml version="1.0" encoding="UTF-8"?>', f'<mdclass:Configuration {NS} uuid="{uuid.uuid4()}">',
+        "  <name>Проба</name>", "  <scriptVariant>Russian</scriptVariant>",
+        "  <commonModules>CommonModule.Серв</commonModules>", "  <catalogs>Catalog.Спр</catalogs>",
+        "</mdclass:Configuration>"], eol="\n")
+    write(repo, src + "CommonModules/Серв/Серв.mdo", [
+        '<?xml version="1.0" encoding="UTF-8"?>', f'<mdclass:CommonModule {NS} uuid="{uuid.uuid4()}">',
+        "  <name>Серв</name>", "  <server>true</server>", "</mdclass:CommonModule>"], eol="\n")
+    write(repo, src + "CommonModules/Серв/Module.bsl", ["Процедура П(Текст) Экспорт", "КонецПроцедуры"], eol="\n")
+    write(repo, src + "Catalogs/Спр/Спр.mdo", [
+        '<?xml version="1.0" encoding="UTF-8"?>', f'<mdclass:Catalog {NS} uuid="{uuid.uuid4()}">', "  <name>Спр</name>",
+        f'  <forms uuid="{uuid.uuid4()}">', "    <name>ФормаЭлемента</name>", "  </forms>", "</mdclass:Catalog>"], eol="\n")
+    write(repo, src + "Catalogs/Спр/Forms/ФормаЭлемента/Form.form", [
+        '<?xml version="1.0" encoding="UTF-8"?>', '<form:Form xmlns:form="http://g5.1c.ru/v8/dt/form">',
+        "  <handlers>", "    <event>OnOpen</event>", "    <name>ПриОткрытии</name>", "  </handlers>",
+        "  <attributes>", "    <name>Счетчик</name>", "    <id>1</id>", "  </attributes>", "</form:Form>"], eol="\n")
+    form = src + "Catalogs/Спр/Forms/ФормаЭлемента/Module.bsl"
+    write(repo, form, ["&НаКлиенте", "Процедура Пусто()", "КонецПроцедуры"], eol="\n")
+    commit(repo)
+    write(repo, src + "CommonModules/Серв/Module.bsl",
+          ["Процедура П(Текст) Экспорт", "\tВыполнить(Текст);", "КонецПроцедуры"], eol="\n")
+    write(repo, form, ["&НаКлиенте", "Процедура Пусто()", "КонецПроцедуры", "",
+                       "&НаКлиенте", "Процедура ПриОткрытии(Отказ)", "\tСчетчик = 1;", "КонецПроцедуры"], eol="\n")
+    out = tmp_path / "диагностики.json"
+    env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "PYTHONIOENCODING": "utf-8", "BSL_JAVA": _JAVA}
+    r = subprocess.run([sys.executable, "-m", "bsl_ls_mcp", "diagnostics", "--repo", str(repo), "--base", "HEAD",
+                        "--out", str(out)], capture_output=True, env=env, timeout=600)
+    assert r.returncode in (0, 1), r.stderr.decode("utf-8", "replace")
+    result = json.loads(out.read_text(encoding="utf-8"))
+    got = {(f["ид"], f["файл"], f["строка"]) for f in result["находки"]}
+    assert result["пропущено"] == []
+    assert ("ExecuteExternalCodeInCommonModule", src + "CommonModules/Серв/Module.bsl", 2) in got, got
+    assert not any(code.startswith("UnusedLocal") for code, _, _ in got), got
+    assert all(line in ((2,) if "Серв" in file else (5, 6, 7, 8)) for _, file, line in got), got
+
+
+def test_live_external_processing_edt_form_attributes_visible(tmp_path):
+    """То же для внешней обработки EDT (ЗИ-70): без DT-INF/PROJECT.PMF analyze раскладку EDT не
+    распознаёт — обёртка 0.12.0 его не клала, и ложные Unused* оставались."""
+    from bsl_ls_mcp.infrastructure.analyze_cli import AnalyzeCliRunner
+
+    obj = tmp_path / "proj" / "src" / "ExternalDataProcessors" / "Обр"
+    (obj / "Forms" / "Форма").mkdir(parents=True)
+    (obj / "Обр.mdo").write_text(
+        f'<?xml version="1.0" encoding="UTF-8"?>\n<mdclass:ExternalDataProcessor {NS} uuid="{uuid.uuid4()}">\n'
+        f'  <name>Обр</name>\n  <forms uuid="{uuid.uuid4()}">\n    <name>Форма</name>\n  </forms>\n'
+        "</mdclass:ExternalDataProcessor>\n", encoding="utf-8")
+    (obj / "ObjectModule.bsl").write_text("Процедура П() Экспорт\nКонецПроцедуры\n", encoding="utf-8")
+    (obj / "Forms" / "Форма" / "Form.form").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n<form:Form xmlns:form="http://g5.1c.ru/v8/dt/form">\n'
+        "  <handlers>\n    <event>OnOpen</event>\n    <name>ПриОткрытии</name>\n  </handlers>\n"
+        "  <attributes>\n    <name>Счетчик</name>\n    <id>1</id>\n  </attributes>\n</form:Form>\n", encoding="utf-8")
+    module = obj / "Forms" / "Форма" / "Module.bsl"
+    module.write_text("&НаКлиенте\nПроцедура ПриОткрытии(Отказ)\n\tСчетчик = 1;\nКонецПроцедуры\n", encoding="utf-8")
+    s = dataclasses.replace(get_settings(), java_path=_JAVA)
+    deps = tools.Deps(lsp=None, analyzer=AnalyzeCliRunner(s), settings=s)
+
+    bare = {d["code"] for d in asyncio.run(deps.analyzer.analyze(module.parent))}
+    assert {"UnusedLocalVariable", "UnusedLocalMethod"} <= bare
+    r = asyncio.run(tools.bsl_diagnostics(deps, path=str(module), min_severity="hint"))
+    assert not any(d["code"].startswith("UnusedLocal") for d in r["diagnostics"]), r["diagnostics"]
+    assert {d["file"] for d in r["diagnostics"]} <= {"ВнешняяОбработка.Обр.Форма.Форма"}

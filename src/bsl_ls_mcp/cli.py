@@ -1,5 +1,5 @@
 """Точка входа: MCP-сервер (выбор транспорта из настроек/CLI, --selftest, --reindex) или
-проверки кода задачи из командной строки (`rules-check`, `task-methods` — см. rules_cli).
+проверки кода задачи из командной строки (`rules-check`, `task-methods`, `diagnostics` — см. rules_cli).
 Используется консольным скриптом `bsl-ls-mcp`, `python -m bsl_ls_mcp`
 и `scripts/run_mcp.py` (все делегируют сюда — DRY)."""
 from __future__ import annotations
@@ -18,8 +18,9 @@ from .settings import get_settings
 
 def main(argv: list[str] | None = None) -> None:
     args_list = sys.argv[1:] if argv is None else argv
-    if args_list and args_list[0] in ("rules-check", "task-methods"):
-        # Проверки кода задачи — отдельный канал без демона: ни MCP-сервера, ни java.
+    if args_list and args_list[0] in ("rules-check", "task-methods", "diagnostics"):
+        # Проверки кода задачи — отдельный канал без демона и без тёплого индекса (diagnostics —
+        # разовый analyze по мини-проекту задачи).
         from .rules_cli import main as checks_main
         sys.exit(checks_main(args_list))
 
