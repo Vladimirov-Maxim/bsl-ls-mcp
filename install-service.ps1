@@ -6,7 +6,7 @@
 #
 # MUST run elevated (Administrator).
 #   powershell -ExecutionPolicy Bypass -File install-service.ps1 -Workspace "E:\1c\src\cf"
-#   EDT project: -Workspace "C:\Projects\git\bf_edt\BF\src" (the folder with Configuration\)
+#   EDT project: -Workspace "C:\Projects\git\<repo>\<Project>\src" (the folder with Configuration\)
 param(
   [string]$ServiceName = "bsl-ls-mcp",
   [string]$Workspace   = "C:\1c\src\cf",

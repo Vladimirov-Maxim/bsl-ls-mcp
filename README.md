@@ -48,7 +48,7 @@ run.cmd
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-service.ps1 -Workspace "C:\1c\src\cf"
 ```
-Для проекта EDT: `-Workspace "C:\Projects\git\bf_edt\BF\src"`. Набор диагностик
+Для проекта EDT: `-Workspace "C:\Projects\git\<репозиторий>\<Проект>\src"`. Набор диагностик
 фиксируется конфигом BSL LS: `-Config "<путь>\.bsl-language-server.json"`.
 Управление — штатными средствами Windows (`Restart-Service bsl-ls-mcp`), полный реиндекс —
 MCP-инструментом `bsl_reindex`. Состояние индекса — `%ProgramData%\bsl-ls-mcp\status.json`.

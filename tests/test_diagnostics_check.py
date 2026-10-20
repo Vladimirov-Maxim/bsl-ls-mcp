@@ -14,14 +14,14 @@ from bsl_ls_mcp.domain.checks.findings import RegistryException
 from bsl_ls_mcp.infrastructure.dir_changes import DirPairChangeSource
 from bsl_ls_mcp.infrastructure.git_changes import GitChangeSource
 
-EDT_FORM = "BF/src/Catalogs/Спр/Forms/ФормаЭлемента/Module.bsl"
+EDT_FORM = "App/src/Catalogs/Спр/Forms/ФормаЭлемента/Module.bsl"
 
 
 def test_descriptions_and_paths():
-    edt, des = tp.Project("BF/src/", tp.EDT), tp.Project("", tp.DESIGNER)
-    assert tp.split_prefix(EDT_FORM, ("", "BF/src/")) == ("BF/src/", "Catalogs/Спр/Forms/ФормаЭлемента/Module.bsl")
-    assert tp.configuration_paths("BF/src/") == {tp.EDT: "BF/src/Configuration/Configuration.mdo",
-                                                 tp.DESIGNER: "BF/src/Configuration.xml", "pmf": "BF/DT-INF/PROJECT.PMF"}
+    edt, des = tp.Project("App/src/", tp.EDT), tp.Project("", tp.DESIGNER)
+    assert tp.split_prefix(EDT_FORM, ("", "App/src/")) == ("App/src/", "Catalogs/Спр/Forms/ФормаЭлемента/Module.bsl")
+    assert tp.configuration_paths("App/src/") == {tp.EDT: "App/src/Configuration/Configuration.mdo",
+                                                 tp.DESIGNER: "App/src/Configuration.xml", "pmf": "App/DT-INF/PROJECT.PMF"}
     assert tp.descriptions("Catalogs/Спр/Forms/Ф/Module.bsl", edt) == ["Catalogs/Спр/Спр.mdo",
                                                                     "Catalogs/Спр/Forms/Ф/Form.form"]
     assert tp.descriptions("CommonForms/Ф/Module.bsl", edt) == ["CommonForms/Ф/Ф.mdo", "CommonForms/Ф/Form.form"]
@@ -62,11 +62,11 @@ def _edt_repo(tmp_path):
     repo = tmp_path / "edt"
     repo.mkdir()
     git(repo, "init", "-q")
-    write(repo, "BF/DT-INF/PROJECT.PMF", ["Manifest-Version: 1.0", "Runtime-Version: 8.3.27"], eol="\n")
-    write(repo, "BF/src/Configuration/Configuration.mdo", ["<mdclass:Configuration/>"], eol="\n")
-    write(repo, "BF/src/Catalogs/Спр/Спр.mdo", ["<mdclass:Catalog/>"], eol="\n")
-    write(repo, "BF/src/Catalogs/Спр/Forms/ФормаЭлемента/Form.form", ["<form:Form/>"], eol="\n")
-    write(repo, "BF/src/Catalogs/Чужой/Чужой.mdo", ["<mdclass:Catalog/>"], eol="\n")
+    write(repo, "App/DT-INF/PROJECT.PMF", ["Manifest-Version: 1.0", "Runtime-Version: 8.3.27"], eol="\n")
+    write(repo, "App/src/Configuration/Configuration.mdo", ["<mdclass:Configuration/>"], eol="\n")
+    write(repo, "App/src/Catalogs/Спр/Спр.mdo", ["<mdclass:Catalog/>"], eol="\n")
+    write(repo, "App/src/Catalogs/Спр/Forms/ФормаЭлемента/Form.form", ["<form:Form/>"], eol="\n")
+    write(repo, "App/src/Catalogs/Чужой/Чужой.mdo", ["<mdclass:Catalog/>"], eol="\n")
     write(repo, EDT_FORM, ["Процедура А()", "КонецПроцедуры"], eol="\n")
     commit(repo)
     write(repo, EDT_FORM, ["Процедура А()", "\tБ = 1;", "КонецПроцедуры", "", "Процедура В()", "КонецПроцедуры"],

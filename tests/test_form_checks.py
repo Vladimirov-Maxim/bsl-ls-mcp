@@ -7,7 +7,7 @@ from bsl_ls_mcp.domain.checks.form_events import form_files_for, handlers_from_c
 from bsl_ls_mcp.infrastructure.git_changes import GitChangeSource
 
 FORM_D = "Catalogs/Спр/Forms/ФормаЭлемента/Ext/Form/Module.bsl"
-FORM_E = "BF/src/Catalogs/Спр/Forms/ФормаЭлемента/Module.bsl"
+FORM_E = "App/src/Catalogs/Спр/Forms/ФормаЭлемента/Module.bsl"
 
 
 def _check(repo, rule):
@@ -16,7 +16,7 @@ def _check(repo, rule):
 
 def test_form_files_and_handler_parsing():
     assert form_files_for(FORM_D) == ["Catalogs/Спр/Forms/ФормаЭлемента/Ext/Form.xml"]
-    assert form_files_for(FORM_E) == ["BF/src/Catalogs/Спр/Forms/ФормаЭлемента/Form.form"]
+    assert form_files_for(FORM_E) == ["App/src/Catalogs/Спр/Forms/ФормаЭлемента/Form.form"]
     edt = "<handlers>\n  <event>StartChoice</event>\n  <name>ПолеНачалоВыбора</name>\n</handlers>"
     des = '<Events><Event name="StartChoice">ПолеНачалоВыбора</Event></Events>'
     assert handlers_from_form(edt) == handlers_from_form(des) == {"поленачаловыбора": {"StartChoice"}}
@@ -85,9 +85,9 @@ def test_server_call_in_client_event_designer(tmp_path):
 
 
 def test_server_call_in_client_event_edt(tmp_path):
-    repo = _form_repo(tmp_path, FORM_E, "BF/src/Catalogs/Спр/Forms/ФормаЭлемента/Form.form",
+    repo = _form_repo(tmp_path, FORM_E, "App/src/Catalogs/Спр/Forms/ФормаЭлемента/Form.form",
                       "<handlers><event>StartChoice</event><name>ПолеНачалоВыбора</name></handlers>")
-    write(repo, "BF/src/Configuration/Configuration.mdo", ["<mdclass:Configuration/>"], eol="\n")
+    write(repo, "App/src/Configuration/Configuration.mdo", ["<mdclass:Configuration/>"], eol="\n")
     found = _check(repo, "form.server-call-in-client-event")
     assert [n for _, n, _ in found] == [3, 27]
 
