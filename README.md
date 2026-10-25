@@ -25,13 +25,17 @@ MCP-обёртка над [BSL Language Server](https://github.com/1c-syntax/bsl
   определяется сам.
 - ~14 ГБ свободной RAM — для навигации (граф держится в памяти). Диагностикам индекс
   не нужен, им хватает ~2 ГБ на разовый вызов.
-- Java 21+ (BSL LS 1.0.x) или готовый бандл с portable JRE (Python/Java ставить не надо).
+- Java 21+ (BSL LS 1.0.x) или собранный бандл с portable JRE: на машине, где он работает,
+  Python и Java ставить не надо.
 
 ## Запуск
 
-### Вариант 1. Готовый бандл (рекомендуется)
+### Вариант 1. Бандл (собирается скриптом `build.ps1`)
 
-Бандл собирается скриптом `build.ps1`: он кладёт в `dist\bsl-ls-mcp\` Python, portable Java и jar BSL LS. Папка самодостаточна, на целевой машине:
+Готового бандла в релизах нет — он собирается на машине с Python: `build.ps1` кладёт в
+`dist\bsl-ls-mcp\` Python и jar BSL LS (скачивает сам), а portable JRE 21 добавляется
+в `dist\bsl-ls-mcp\jre\` отдельно — скрипт в конце подскажет, откуда взять. Дальше папка
+самодостаточна, на целевой машине:
 
 ```bat
 :: 1. указать путь к исходникам 1С (или отредактировать BSL_WORKSPACE в run.cmd)
@@ -55,8 +59,13 @@ MCP-инструментом `bsl_reindex`. Состояние индекса �
 
 ### Вариант 2. С исходников (нужны Python 3.10+ и Java 21+)
 
+jar BSL LS в репозиторий не входит: его нужно положить в `server\` (или указать путь
+в `BSL_LS_JAR`).
+
 ```powershell
 py -3 -m pip install -e .
+$jar = "bsl-language-server-1.0.7-exec.jar"
+Invoke-WebRequest "https://github.com/1c-syntax/bsl-language-server/releases/download/v1.0.7/$jar" -OutFile "server\$jar"
 $env:BSL_WORKSPACE = "C:\1c\src\cf"
 bsl-ls-mcp --transport streamable-http --port 8081     # → http://127.0.0.1:8081/mcp
 ```
