@@ -121,6 +121,11 @@ def _selftest(module: str | None) -> None:
         print(f"[selftest] workspace = {s.workspace}", file=sys.stderr)
         print(f"[selftest] java      = {s.java_path}", file=sys.stderr)
         print(f"[selftest] jar       = {s.jar_path}  (Xmx={s.xmx})", file=sys.stderr)
+        if not s.jar_path.is_file():
+            print(f"[selftest] FAIL: нет jar BSL LS: {s.jar_path}. Скачайте {s.jar_path.name} "
+                  "с https://github.com/1c-syntax/bsl-language-server/releases в эту папку "
+                  "или укажите путь в BSL_LS_JAR")
+            return 1
         mod = module or _first_common_module(s.workspace)
         if not mod:
             print("[selftest] FAIL: общий модуль не найден; задайте --selftest 'ОбщийМодуль.Имя'")
@@ -142,7 +147,7 @@ def _selftest(module: str | None) -> None:
               f"за {time.time() - t:.0f}с")
         for d in diags[:5]:
             print("   ", d)
-        print("[selftest] OK — обёртка, java и индексация работают на этой машине")
+        print("[selftest] OK — обёртка, java и BSL LS работают на этой машине (индекс не строился)")
         return 0
 
     sys.exit(asyncio.run(run()))
