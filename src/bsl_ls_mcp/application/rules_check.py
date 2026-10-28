@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from ..domain.checks.bsl_line import split_text
 from ..domain.checks.bsl_module import ModuleModel
-from ..domain.checks import form_events
+from ..domain.checks import form_events, query_text
 from ..domain.checks.engine import FileUnderCheck, check_files, own_modules, task_methods
 from ..domain.checks.findings import finish
 from ..domain.checks.module_names import common_module_paths, module_label
@@ -41,8 +41,17 @@ def _wanted(path: str, paths: list[str] | None) -> bool:
 
 
 def _files(source: ChangeSource, paths: list[str] | None) -> tuple[list[FileUnderCheck], list]:
+    """Модули задачи и схемы компоновки данных задачи (запросы наборов данных)."""
     changes = source.changes()
-    return [f for _, f in _files_with_changes(source, paths, changes)], changes
+    files = [f for _, f in _files_with_changes(source, paths, changes)]
+    for c in changes:
+        if c.status == "D" or not c.path.casefold().endswith((".dcs", ".xml")) or not _wanted(c.path, paths):
+            continue
+        text = source.new_text(c.path)
+        if text is not None and query_text.is_dcs(c.path, text):
+            files.append(FileUnderCheck(path=c.path, status=c.status, lines=split_text(text),
+                                        mask=source.changed_lines(c)))
+    return files, changes
 
 
 def _files_with_changes(source: ChangeSource, paths: list[str] | None, changes: list):
