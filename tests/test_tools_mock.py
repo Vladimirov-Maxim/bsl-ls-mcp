@@ -157,9 +157,17 @@ def test_complexity_pairs_metrics():
 
 
 def test_complexity_function_filter():
-    # фильтр по методу: несуществующий → пусто
-    r = asyncio.run(T.bsl_complexity(_deps(), "ОбщийМодуль.ТестОбщийМодуль", function="НетТакого"))
-    assert r == []
+    # перечень через запятую; несуществующий метод — ошибка с именем, а не пустой ответ
+    r = asyncio.run(T.bsl_complexity(_deps(), "ОбщийМодуль.ТестОбщийМодуль", function=" вычислитьсумму ,"))
+    assert [x["full_name"] for x in r] == ["ОбщийМодуль.ТестОбщийМодуль.ВычислитьСумму"]
+    for function, text in (("НетТакого", "метод не найден: неттакого"),
+                           ("ВычислитьСумму, НетТакого", "найдены: ОбщийМодуль.ТестОбщийМодуль.ВычислитьСумму"),
+                           (" , ", "пустое имя")):
+        try:
+            asyncio.run(T.bsl_complexity(_deps(), "ОбщийМодуль.ТестОбщийМодуль", function=function))
+            assert False, "ожидали ResolveError"
+        except T.ResolveError as exc:
+            assert text in str(exc)
 
 
 def test_complexity_rejects_bad_name():

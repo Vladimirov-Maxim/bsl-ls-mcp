@@ -137,7 +137,8 @@ async def bsl_complexity(module_full_name: str | None = None, function: str | No
     РОВНО ОДИН адрес: module_full_name — 'ОбщийМодуль.МойМодуль' | 'Отчет.Х' (все модули
     объекта) | форма; ИЛИ path — любой локальный .bsl или каталог: внешняя обработка,
     расширение тестов, выгрузка ревизии MR (full_name — имя модуля 1С, где его можно
-    определить, иначе путь от path). function (опц.) — только этот метод."""
+    определить, иначе путь от path). function (опц.) — только этот метод или перечень через
+    запятую; ненайденный метод — ошибка «метод не найден»."""
     async with _sem:
         return await tools.bsl_complexity(_d(), module_full_name, function, path)
 

@@ -6,7 +6,12 @@
 объектов и форм раскладываются во временный мини-проект (`domain.task_project`), по нему —
 analyze: так BSL LS знает тип модуля и реквизиты формы, без тёплого индекса и без всей
 конфигурации. Межмодульного контекста нет: несуществующий метод общего модуля
-(`MissingCommonModuleMethod`) здесь не виден — это LSP-проверка `bsl_diagnostics`."""
+(`MissingCommonModuleMethod`) здесь не виден — это LSP-проверка `bsl_diagnostics`.
+
+Диагностики метаданных (`DenyIncompleteValues`, имена общих модулей…) BSL LS ставит на начало
+модуля, а предмет их — описание объекта. Такая находка переносится на файл описания (`<Имя>.mdo`
+/ `<Имя>.xml`) и строку свойства, названного в сообщении; в находки идёт, только если эту строку
+правила задача (строку не нашли — если задача правила описание: тогда первая её строка там)."""
 from __future__ import annotations
 
 import shutil
@@ -91,6 +96,20 @@ def _materialize(source: ChangeSource, project: tp.Project, modules: list[str], 
     return copies
 
 
+def _on_description(source: ChangeSource, project: tp.Project, module: str, message: str,
+                    desc_masks: dict[str, frozenset[int]]) -> tuple[str, int] | None:
+    """(описание объекта, строка) для диагностики метаданных модуля; None — задача это не правила."""
+    descs = tp.descriptions(module[len(project.prefix):], project)
+    mask = desc_masks.get(project.prefix + descs[0]) if descs else None
+    if not mask:
+        return None
+    desc = project.prefix + descs[0]
+    line = tp.metadata_line(source.new_text(desc) or "", message)
+    if line is None:
+        return desc, min(mask)
+    return (desc, line) if line in mask else None
+
+
 async def run_diagnostics_check(source: ChangeSource, analyzer: CodeAnalyzer, *,
                                 paths: list[str] | None = None,
                                 severity_overrides: tuple[tuple[str, str], ...] = (),
@@ -112,6 +131,8 @@ async def run_diagnostics_check(source: ChangeSource, analyzer: CodeAnalyzer, *,
         groups[found[0]].append(f.path)
         masks[f.path] = f.mask
 
+    desc_masks = {c.path: source.changed_lines(c) for c in source.changes()
+                  if c.status != "D" and c.path.lower().endswith((".mdo", ".xml"))}
     overrides = dict(severity_overrides)
     findings: list[Finding] = []
     for project, modules in groups.items():
@@ -125,9 +146,14 @@ async def run_diagnostics_check(source: ChangeSource, analyzer: CodeAnalyzer, *,
                     continue
                 m = mapper.analyze_diagnostic_to_model(path, d)
                 level = _LEVEL.get(overrides.get(m.code, m.severity))
-                if level is None or m.line not in masks[path]:
+                if level is None:
                     continue
-                findings.append(Finding(m.code, level, path, m.line, m.message, None))
+                if m.code in tp.METADATA_DIAGNOSTICS:
+                    at = _on_description(source, project, path, m.message, desc_masks)
+                    if at is not None:
+                        findings.append(Finding(m.code, level, at[0], at[1], m.message, None))
+                elif m.line in masks[path]:
+                    findings.append(Finding(m.code, level, path, m.line, m.message, None))
         except Exception as exc:          # analyze упал — называем, а не теряем молча
             skipped.append(Skipped(f"диагностики {project.prefix or '.'} ({len(modules)} модулей)",
                                    f"{type(exc).__name__}: {exc}"))

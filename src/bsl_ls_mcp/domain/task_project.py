@@ -10,6 +10,7 @@ Configuration.mdo`; без `DT-INF` EDT-раскладку analyze не расп
 источника правок и диск — у вызывающего."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from . import external_objects as eo
@@ -17,6 +18,19 @@ from . import external_objects as eo
 EDT = "edt"
 DESIGNER = "designer"
 DEFAULT_PMF = "Manifest-Version: 1.0\nRuntime-Version: 8.3.24\n"
+
+# Диагностики метаданных BSL LS (1.0.7: наследники AbstractMetadataDiagnostic и проверки имён общих
+# модулей). Предмет — свойство в описании объекта, а BSL LS ставит их на начало модуля объекта.
+# ScheduledJobHandler не входит: его предмет — регламентное задание, у которого модуля нет.
+METADATA_DIAGNOSTICS: frozenset[str] = frozenset({
+    "DenyIncompleteValues", "ForbiddenMetadataName", "MetadataObjectNameLength",
+    "SameMetadataObjectAndChildNames", "CommonModuleInvalidType", "CommonModuleNameCached",
+    "CommonModuleNameClient", "CommonModuleNameClientServer", "CommonModuleNameFullAccess",
+    "CommonModuleNameGlobal", "CommonModuleNameGlobalClient", "CommonModuleNameServerCall",
+    "CommonModuleNameWords",
+})
+
+_QUOTED = re.compile(r'"([^"]+)"|`([^`]+)`')
 
 # Каталоги внешних объектов EDT (проект внешней обработки/отчёта).
 _EDT_EXTERNAL_DIRS = {"externaldataprocessors": "ExternalDataProcessor", "externalreports": "ExternalReport"}
@@ -122,3 +136,18 @@ def external_configuration(project: Project, root_text: str) -> tuple[str, str]:
     if project.fmt == EDT:
         return "src/Configuration/Configuration.mdo", eo.edt_configuration(project.name, project.external)
     return "Configuration.xml", eo.designer_configuration(project.name, project.external, root_text)
+
+
+def metadata_line(description: str, message: str) -> int | None:
+    """Строка описания объекта, к которой относится диагностика метаданных: имя из кавычек сообщения
+    (измерение, реквизит, сам объект) — строка `<name>Имя</name>` (EDT) или `<Name>Имя</Name>`
+    (конфигуратор). Берётся первое имя сообщения, которое есть в описании, и последнее его вхождение:
+    у реквизита, одноимённого с объектом, это строка реквизита. None — имени в описании нет."""
+    lines = description.splitlines()
+    for m in _QUOTED.finditer(message):
+        name = (m.group(1) or m.group(2)).rsplit(".", 1)[-1]
+        tag = re.compile(rf"<(?:name|Name)>\s*{re.escape(name)}\s*</(?:name|Name)>")
+        hits = [n for n, line in enumerate(lines, 1) if tag.search(line)]
+        if hits:
+            return hits[-1]
+    return None

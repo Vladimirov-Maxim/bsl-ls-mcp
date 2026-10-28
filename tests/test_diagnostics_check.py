@@ -138,3 +138,63 @@ def test_cli_diagnostics_input_error(tmp_path):
                        capture_output=True, cwd=ROOT, env={"PYTHONPATH": str(ROOT / "src"), "SYSTEMROOT": "C:\\Windows",
                                                            "PYTHONIOENCODING": "utf-8"})
     assert r.returncode == 2 and "git" in r.stderr.decode("utf-8")
+
+
+def test_metadata_line():
+    edt = ["<mdclass:InformationRegister>", "  <name>Курсы</name>", "  <dimensions>",
+           "    <name>Валюта</name>", "  </dimensions>", "  <resources>", "    <name>Курсы</name>"]
+    msg = 'Не указан флаг "Запрет незаполненных значений" у измерения "Валюта" метаданного "РегистрСведений.Курсы"'
+    assert tp.metadata_line("\n".join(edt), msg) == 4
+    assert tp.metadata_line("\n".join(edt), "Измените имя `Курсы`, чтобы оно не совпадало с родительским `Курсы`") == 7
+    assert tp.metadata_line("<Properties><Name>Курсы</Name>", "Длина имени `РегистрСведений.Курсы`") == 1
+    assert tp.metadata_line("\n".join(edt), "Общий модуль имеет неверный тип") is None
+
+
+REG = "App/src/InformationRegisters/Курсы"
+
+
+def _register_repo(tmp_path, new_dimension: bool):
+    repo = tmp_path / "reg"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    write(repo, "App/DT-INF/PROJECT.PMF", ["Manifest-Version: 1.0"], eol="\n")
+    write(repo, "App/src/Configuration/Configuration.mdo", ["<mdclass:Configuration/>"], eol="\n")
+    mdo = ["<mdclass:InformationRegister>", "  <name>Курсы</name>", "  <dimensions>", "    <name>Валюта</name>",
+           "  </dimensions>"]
+    write(repo, f"{REG}/Курсы.mdo", mdo + ["</mdclass:InformationRegister>"], eol="\n")
+    write(repo, f"{REG}/ManagerModule.bsl", ["Процедура А()", "КонецПроцедуры"], eol="\n")
+    commit(repo)
+    if new_dimension:
+        mdo += ["  <dimensions>", "    <name>Банк</name>", "  </dimensions>"]
+    write(repo, f"{REG}/Курсы.mdo", mdo + ["  <comment>к</comment>", "</mdclass:InformationRegister>"], eol="\n")
+    write(repo, f"{REG}/ManagerModule.bsl", ["Процедура А()", "\tБ = 1;", "КонецПроцедуры"], eol="\n")
+    return repo
+
+
+def test_metadata_diagnostic_goes_to_description(tmp_path):
+    def msg(dim):
+        return f'Не указан флаг "Запрет незаполненных значений" у измерения "{dim}" метаданного "Курсы"'
+
+    class MetaAnalyzer(ProjectAnalyzer):
+        async def analyze(self, src_dir):
+            out = await super().analyze(src_dir)
+            for d, dim in zip(out, ("Банк", "Валюта", "")):
+                d["message"] = msg(dim) if dim else "Общий модуль имеет неверный тип"
+            return out
+
+    diags = [(1, "DenyIncompleteValues", "Warning"), (1, "DenyIncompleteValues", "Warning"),
+             (1, "CommonModuleInvalidType", "Error")]
+    fa = MetaAnalyzer("src/InformationRegisters/Курсы/ManagerModule.bsl", diags)
+    r = asyncio.run(run_diagnostics_check(GitChangeSource(_register_repo(tmp_path, True), "HEAD"), fa))
+    # новое измерение — на его строке; старое («Валюта») задача не трогала; без имени — первая правка
+    assert [(f["ид"], f["файл"], f["строка"]) for f in r["находки"]] == [
+        ("CommonModuleInvalidType", f"{REG}/Курсы.mdo", 6), ("DenyIncompleteValues", f"{REG}/Курсы.mdo", 7)]
+
+
+def test_metadata_diagnostic_needs_description_change(tmp_path):
+    repo = _register_repo(tmp_path, False)
+    git(repo, "checkout", "--", f"{REG}/Курсы.mdo")                        # описание задача не правила
+    fa = ProjectAnalyzer("src/InformationRegisters/Курсы/ManagerModule.bsl",
+                         [(1, "DenyIncompleteValues", "Warning"), (2, "Х", "Error")])
+    r = asyncio.run(run_diagnostics_check(GitChangeSource(repo, "HEAD"), fa))
+    assert [(f["ид"], f["строка"]) for f in r["находки"]] == [("Х", 2)]
