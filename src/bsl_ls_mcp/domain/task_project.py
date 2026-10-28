@@ -32,6 +32,33 @@ METADATA_DIAGNOSTICS: frozenset[str] = frozenset({
 
 _QUOTED = re.compile(r'"([^"]+)"|`([^`]+)`')
 
+# Виды объектов — таблиц запроса (рус. и англ. имя → каталог в исходниках). Объект, на который
+# ссылается запрос модуля, а описания его в проекте нет, BSL LS считает несуществующим
+# (`QueryToMissingMetadata`): проверка ищет объект в конфигурации, полей не касается.
+_QUERY_TABLE_DIRS: dict[str, str] = {
+    "Справочник": "Catalogs", "Catalog": "Catalogs",
+    "Документ": "Documents", "Document": "Documents",
+    "ЖурналДокументов": "DocumentJournals", "DocumentJournal": "DocumentJournals",
+    "Перечисление": "Enums", "Enum": "Enums",
+    "Константа": "Constants", "Constant": "Constants",
+    "РегистрСведений": "InformationRegisters", "InformationRegister": "InformationRegisters",
+    "РегистрНакопления": "AccumulationRegisters", "AccumulationRegister": "AccumulationRegisters",
+    "РегистрБухгалтерии": "AccountingRegisters", "AccountingRegister": "AccountingRegisters",
+    "РегистрРасчета": "CalculationRegisters", "CalculationRegister": "CalculationRegisters",
+    "ПланСчетов": "ChartsOfAccounts", "ChartOfAccounts": "ChartsOfAccounts",
+    "ПланВидовХарактеристик": "ChartsOfCharacteristicTypes",
+    "ChartOfCharacteristicTypes": "ChartsOfCharacteristicTypes",
+    "ПланВидовРасчета": "ChartsOfCalculationTypes", "ChartOfCalculationTypes": "ChartsOfCalculationTypes",
+    "ПланОбмена": "ExchangePlans", "ExchangePlan": "ExchangePlans",
+    "БизнесПроцесс": "BusinessProcesses", "BusinessProcess": "BusinessProcesses",
+    "Задача": "Tasks", "Task": "Tasks",
+    "КритерийОтбора": "FilterCriteria", "FilterCriterion": "FilterCriteria",
+    "Последовательность": "Sequences", "Sequence": "Sequences",
+}
+_QUERY_TABLE = re.compile(
+    r"(?<![\w.])(" + "|".join(sorted(_QUERY_TABLE_DIRS, key=len, reverse=True)) + r")\.(\w+)", re.IGNORECASE)
+_QUERY_TABLE_KEYS = {k.casefold(): v for k, v in _QUERY_TABLE_DIRS.items()}
+
 # Каталоги внешних объектов EDT (проект внешней обработки/отчёта).
 _EDT_EXTERNAL_DIRS = {"externaldataprocessors": "ExternalDataProcessor", "externalreports": "ExternalReport"}
 
@@ -151,3 +178,18 @@ def metadata_line(description: str, message: str) -> int | None:
         if hits:
             return hits[-1]
     return None
+
+
+def query_objects(text: str) -> list[tuple[str, str]]:
+    """Объекты, на которые ссылается текст модуля как на таблицы запроса (`Документ.Заказ`,
+    `РегистрСведений.Курсы.СрезПоследних`, `ЗНАЧЕНИЕ(Перечисление.Х.У)`): [(каталог, имя)] без
+    повторов. Ищется по всему тексту, не только в запросах: лишний объект проекту не вредит."""
+    seen: dict[tuple[str, str], None] = {}
+    for m in _QUERY_TABLE.finditer(text):
+        seen[(_QUERY_TABLE_KEYS[m.group(1).casefold()], m.group(2))] = None
+    return list(seen)
+
+
+def object_description(kind_dir: str, name: str, project: Project) -> str:
+    """Путь описания объекта конфигурации от её корня."""
+    return f"{kind_dir}/{name}/{name}.mdo" if project.fmt == EDT else f"{kind_dir}/{name}.xml"

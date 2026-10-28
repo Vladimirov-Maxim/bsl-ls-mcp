@@ -5,7 +5,9 @@
 из него, а не с диска — ревизии на диске может не быть. Модули задачи вместе с описаниями их
 объектов и форм раскладываются во временный мини-проект (`domain.task_project`), по нему —
 analyze: так BSL LS знает тип модуля и реквизиты формы, без тёплого индекса и без всей
-конфигурации. Межмодульного контекста нет: несуществующий метод общего модуля
+конфигурации. Описания объектов, на которые ссылаются запросы модулей (`Документ.Х`,
+`РегистрСведений.Y.СрезПоследних`), кладутся туда же — иначе каждый такой объект для BSL LS
+не существует (`QueryToMissingMetadata`). Межмодульного контекста нет: несуществующий метод общего модуля
 (`MissingCommonModuleMethod`) здесь не виден — это LSP-проверка `bsl_diagnostics`.
 
 Диагностики метаданных (`DenyIncompleteValues`, имена общих модулей…) BSL LS ставит на начало
@@ -90,9 +92,20 @@ def _materialize(source: ChangeSource, project: tp.Project, modules: list[str], 
             text = source.new_text(project.prefix + desc)
             if text is not None:
                 _write(root / tp.project_path(desc, project), tp.transform(text, project))
+        text = source.new_text(path) or ""
         dst = root / tp.project_path(rel, project)
-        _write(dst, source.new_text(path) or "")
+        _write(dst, text)
         copies[_key(dst)] = path
+        if project.external is not None:
+            continue                       # конфигурации нет — объектов запросов взять неоткуда
+        for kind_dir, name in tp.query_objects(text):
+            desc = tp.object_description(kind_dir, name, project)
+            if desc in written:
+                continue
+            written.add(desc)
+            desc_text = source.new_text(project.prefix + desc)
+            if desc_text is not None:
+                _write(root / tp.project_path(desc, project), desc_text)
     return copies
 
 

@@ -198,3 +198,25 @@ def test_metadata_diagnostic_needs_description_change(tmp_path):
                          [(1, "DenyIncompleteValues", "Warning"), (2, "Х", "Error")])
     r = asyncio.run(run_diagnostics_check(GitChangeSource(repo, "HEAD"), fa))
     assert [(f["ид"], f["строка"]) for f in r["находки"]] == [("Х", 2)]
+
+
+def test_query_objects():
+    text = ('Запрос.Текст = "ВЫБРАТЬ * ИЗ Документ.Заказ КАК З\n'
+            '| ЛЕВОЕ СОЕДИНЕНИЕ РегистрСведений.Курсы.СрезПоследних(, ) КАК К ПО ИСТИНА\n'
+            '| ГДЕ З.Статус = ЗНАЧЕНИЕ(Перечисление.Статусы.Новый) И З.Ссылка В (ВЫБРАТЬ Р.Ссылка ИЗ документ.Заказ КАК Р)";\n'
+            'Менеджер = Документы.Заказ; Т = Метаданные.Документ.Реквизиты; InformationRegister.Rates.Select();')
+    assert tp.query_objects(text) == [("Documents", "Заказ"), ("InformationRegisters", "Курсы"),
+                                      ("Enums", "Статусы"), ("InformationRegisters", "Rates")]
+    edt, des = tp.Project("App/src/", tp.EDT), tp.Project("", tp.DESIGNER)
+    assert tp.object_description("Documents", "Заказ", edt) == "Documents/Заказ/Заказ.mdo"
+    assert tp.object_description("Documents", "Заказ", des) == "Documents/Заказ.xml"
+
+
+def test_query_objects_in_project(tmp_path):
+    repo = _edt_repo(tmp_path)
+    write(repo, EDT_FORM, ["Процедура А()", '\tТекст = "ВЫБРАТЬ * ИЗ Справочник.Чужой КАК Ч '
+                           'ЛЕВОЕ СОЕДИНЕНИЕ Документ.НетТакого КАК Н ПО ИСТИНА";', "КонецПроцедуры"], eol="\n")
+    fa = ProjectAnalyzer("src/Catalogs/Спр/Forms/ФормаЭлемента/Module.bsl", [])
+    asyncio.run(run_diagnostics_check(GitChangeSource(repo, "HEAD"), fa))
+    assert "src/Catalogs/Чужой/Чужой.mdo" in fa.files                       # объект запроса — в проекте
+    assert not any("НетТакого" in f for f in fa.files)                       # нет в источнике — не выдумываем
