@@ -540,13 +540,15 @@ async def bsl_complexity(deps: Deps, module_full_name: str | None = None,
       path             — любой локальный .bsl или каталог (все .bsl под ним): внешняя обработка,
                          расширение тестов, выгрузка ревизии MR. full_name — имя модуля 1С, если
                          путь в корпусе или во внешней обработке/отчёте, иначе путь от path.
-    function (опц.) — только этот метод (без учёта регистра).
+    function (опц.) — только этот метод или перечень через запятую (без учёта регистра); метода нет
+                      ни в одном модуле адреса — ошибка «метод не найден» с перечнем имеющихся.
     Числа берутся из code lens сложности (textDocument/codeLens + codeLens/resolve); файл вне
     workspace открывается на сервере только на время запроса."""
     if (module_full_name is None) == (path is None):
         raise ResolveError("укажите РОВНО ОДИН адрес: module_full_name (модуль корпуса) | path (файл/каталог)")
+    wanted = _method_names(function)
     if path is not None:
-        return await _complexity_by_path(deps, Path(path), function)
+        return _all_found(await _complexity_by_path(deps, Path(path), wanted), wanted)
     if module_full_name.count(".") < 1:
         raise ResolveError("ожидался формат Тип.Модуль, напр. 'ОбщийМодуль.МойМодуль'")
     ws = deps.settings.workspace
@@ -559,11 +561,33 @@ async def bsl_complexity(deps: Deps, module_full_name: str | None = None,
         prefix = module_full_name
         if len(uris) > 1:   # несколько модулей объекта — адрес каждого (МодульОбъекта/…)
             prefix = mapper.analyze_label_from_uri(ws, uri) or module_full_name
-        out += await _complexity_of(deps, uri, prefix, function)
+        out += await _complexity_of(deps, uri, prefix, wanted)
+    return _all_found(out, wanted)
+
+
+def _method_names(function: str | None) -> frozenset[str] | None:
+    """`function` → имена методов без учёта регистра; None — все методы."""
+    if function is None:
+        return None
+    names = frozenset(n.strip().casefold() for n in function.split(",") if n.strip())
+    if not names:
+        raise ResolveError("function: пустое имя метода")
+    return names
+
+
+def _all_found(out: list[dict], wanted: frozenset[str] | None) -> list[dict]:
+    """Каждый запрошенный метод нашёлся — иначе ошибка с перечнем ненайденных, а не молчаливый пропуск."""
+    if wanted is None:
+        return out
+    found = {r["full_name"].rsplit(".", 1)[-1].casefold() for r in out}
+    missing = sorted(wanted - found)
+    if missing:
+        raise ResolveError(f"метод не найден: {', '.join(missing)}"
+                           + (f" (найдены: {', '.join(r['full_name'] for r in out)})" if out else ""))
     return out
 
 
-async def _complexity_by_path(deps: Deps, p: Path, function: str | None) -> list[dict]:
+async def _complexity_by_path(deps: Deps, p: Path, wanted: frozenset[str] | None) -> list[dict]:
     if not resolver.is_local_path(p):
         raise ResolveError(f"UNC-пути (\\\\host\\share) запрещены: {str(p)!r}")
     if not p.exists():
@@ -585,22 +609,21 @@ async def _complexity_by_path(deps: Deps, p: Path, function: str | None) -> list
                  or (external.label(f) if external is not None else None)
                  or f.resolve().relative_to(base.resolve()).with_suffix("").as_posix())
         try:
-            out += await _complexity_of(deps, uri, label, function)
+            out += await _complexity_of(deps, uri, label, wanted)
         finally:
             if not inside:
                 await deps.lsp.close(uri, forget=True)
     return out
 
 
-async def _complexity_of(deps: Deps, uri: str, prefix: str, function: str | None) -> list[dict]:
+async def _complexity_of(deps: Deps, uri: str, prefix: str, wanted: frozenset[str] | None) -> list[dict]:
     # отбираем линзы сложности нужного метода
     lenses = [
         (mapper.lens_complexity_kind(ln), mapper.lens_method_name(ln), ln)
         for ln in await deps.lsp.code_lens(uri)
     ]
-    wanted = function.casefold() if function is not None else None
     lenses = [(k, m, ln) for k, m, ln in lenses
-              if k is not None and (wanted is None or m.casefold() == wanted)]
+              if k is not None and (wanted is None or m.casefold() in wanted)]
 
     # резолвим параллельно (каждый resolve — отдельный round-trip)
     resolved = await asyncio.gather(*(deps.lsp.resolve_code_lens(ln) for _, _, ln in lenses))
