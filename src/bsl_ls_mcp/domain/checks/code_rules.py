@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from functools import cached_property
 
-from . import form_events
+from . import form_events, query_text
 from .bsl_module import Method, ModuleModel
 from .knowledge import MAX_PARAMS, Knowledge
 
@@ -68,6 +68,7 @@ class CodeCheck:
     level: str          # уровень по умолчанию (без реестра)
     text: str           # текст по умолчанию (без реестра), нейтральный
     run: Callable[[FileContext], Iterable[Hit]]
+    dcs: bool = False   # проверка и для схем компоновки данных (по умолчанию — только модули .bsl)
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +572,27 @@ def _directive_line(ctx: FileContext, m: Method) -> int:
 
 
 # ---------------------------------------------------------------------------
+# временная таблица в соединении без индекса
+
+def _temp_table_join_without_index(ctx: FileContext) -> Iterator[Hit]:
+    """Находка — на строке `ПОМЕСТИТЬ`, если её правила задача, иначе на первой строке задачи, где
+    таблица стоит в соединении: старое помещение без индекса задаче не вменяется, пока она его
+    не трогает и нового соединения с ним не пишет."""
+    if not ctx.path.casefold().endswith(".bsl"):         # схему компоновки отобрал сценарий
+        stream = query_text.dcs_stream(ctx.model.lines)
+    else:
+        stream = query_text.module_stream(ctx.model.parts)
+    for t in query_text.unindexed_joined_temp_tables(stream):
+        joins = ", ".join(str(n) for n in t.join_lines)
+        if t.put_line in ctx.mask:
+            yield Hit(t.put_line, f"{t.name} (соединение: строка {joins})")
+            continue
+        task_join = next((n for n in t.join_lines if n in ctx.mask), None)
+        if task_join is not None:
+            yield Hit(task_join, f"{t.name} (помещена в строке {t.put_line})")
+
+
+# ---------------------------------------------------------------------------
 
 CATALOG: dict[str, CodeCheck] = {c.key: c for c in (
     CodeCheck("form.assign-form-property", "Warn",
@@ -626,4 +648,7 @@ CATALOG: dict[str, CodeCheck] = {c.key: c for c in (
     CodeCheck("call.foreign-internal-api", "Fail",
               "вызов метода из области СлужебныйПрограммныйИнтерфейс чужого общего модуля",
               _foreign_internal_api),
+    CodeCheck("query.temp-table-join-without-index", "Warn",
+              "временная таблица участвует в соединении, а помещена без ИНДЕКСИРОВАТЬ ПО",
+              _temp_table_join_without_index, dcs=True),
 )}

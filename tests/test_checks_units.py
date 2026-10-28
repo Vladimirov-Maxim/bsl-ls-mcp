@@ -208,7 +208,7 @@ def test_registry_without_our_rules_is_reported_not_clean():
 
 def test_default_ruleset_without_registry():
     rs = default_ruleset()
-    assert rs.templates == () and len(rs.code_rules) == 26
+    assert rs.templates == () and len(rs.code_rules) == 27
     assert all(r.rule_id == r.check.key for r in rs.code_rules)
 
 

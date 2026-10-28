@@ -44,7 +44,8 @@ def check_files(files: Iterable[FileUnderCheck], rules: RuleSet, *,
         if not f.mask:
             continue
         model = ModuleModel(f.lines)
-        templates = [t for t in rules.templates if t.applies_to(f.path)]
+        module = f.path.casefold().endswith(".bsl")     # иначе схема компоновки: только проверки с dcs
+        templates = [t for t in rules.templates if module and t.applies_to(f.path)]
         if templates:
             for n in sorted(f.mask):
                 if n > len(f.lines):
@@ -59,6 +60,8 @@ def check_files(files: Iterable[FileUnderCheck], rules: RuleSet, *,
         ctx = FileContext(path=f.path, model=model, mask=f.mask, knowledge=rules.knowledge,
                           own_modules=own, common_module=common_module, form_handlers=form_handlers(f.path))
         for rule in rules.code_rules:
+            if not (module or rule.check.dcs):
+                continue
             ctx.params = rule.params
             for hit in rule.check.run(ctx):
                 text = f"{rule.text}: {hit.detail}" if hit.detail else rule.text
