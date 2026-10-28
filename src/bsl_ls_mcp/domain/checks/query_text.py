@@ -80,6 +80,26 @@ def is_dcs(path: str, text: str | None = None) -> bool:
     return p.endswith("/ext/template.xml") and text is not None and "DataCompositionSchema" in text
 
 
+_REF_ALIAS = re.compile(r"(?<![\w.])[\w.]*\.(?:Ссылка|Ref)\s+(?:КАК|AS)\s+(\w+)", re.IGNORECASE)
+_REF_BARE = re.compile(r"(?<![\w.])\w+\.(Ссылка|Ref)(?![\w.])(?!\s+(?:КАК|AS)\s)", re.IGNORECASE)
+_PRESENTATION = re.compile(r"(?<![\w.])(?:ПРЕДСТАВЛЕНИЕ(?:ССЫЛКИ)?|PRESENTATION|REFPRESENTATION)\s*\(\s*"
+                           r"(?:\w+\.)*(\w+)\s*\)", re.IGNORECASE)
+_PRESENTATION_PROP = re.compile(r"(?<![\w.])(?:\w+\.)+(\w+)\.(?:Представление|Presentation)(?![\w.])",
+                                re.IGNORECASE)
+
+
+def reference_fields(stream: QueryStream) -> frozenset[str]:
+    """Имена полей запросов модуля, о которых из текста видно, что они ссылочные (casefold):
+    `….Ссылка КАК Поле`, `….Ссылка` без псевдонима (поле `Ссылка`), `ПРЕДСТАВЛЕНИЕ(….Поле)`,
+    `….Поле.Представление`. Тип полей по метаданным не выводится — только то, что сказано в запросе."""
+    text = stream.text
+    names = {m.group(1) for m in _REF_ALIAS.finditer(text)}
+    names |= {m.group(1) for m in _REF_BARE.finditer(text)}
+    names |= {m.group(1) for m in _PRESENTATION.finditer(text)}
+    names |= {m.group(1) for m in _PRESENTATION_PROP.finditer(text)}
+    return frozenset(n.casefold() for n in names)
+
+
 @dataclass(frozen=True)
 class UnindexedJoin:
     name: str

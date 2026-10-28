@@ -54,6 +54,11 @@ class FileContext:
 
     # --- справка о вызовах внутри модуля: кто читает/пишет базу (транзитивно) ---
     @cached_property
+    def reference_fields(self) -> frozenset[str]:
+        """Поля запросов модуля, ссылочные по тексту запроса (casefold)."""
+        return query_text.reference_fields(query_text.module_stream(self.model.parts))
+
+    @cached_property
     def call_profile(self) -> CallProfile:
         return _call_profile(self.model, self.knowledge)
 
@@ -146,10 +151,145 @@ def _loop_lines(ctx: FileContext) -> Iterator[tuple[Method, int, str]]:
 
 
 def _loop_db_read(ctx: FileContext) -> Iterator[Hit]:
+    """Явное чтение (`knowledge.db_read`) и неявное — представление или реквизит ссылочного поля
+    выборки запроса. `Об = ….ПолучитьОбъект()` с записью `Об` дальше в том же цикле — не находка:
+    объект берут, чтобы изменить, пакетной альтернативы нет (запись в цикле — `loop.db-write`)."""
     read = ctx.knowledge.regex("db_read")
-    for _m, n, code in _loop_lines(ctx):
-        if read.search(code):
+    rows: dict[str, frozenset[str]] = {}
+    for m, n, code in _loop_lines(ctx):
+        found = list(read.finditer(code))
+        if found and not _object_for_write(ctx, m, n, code, found):
             yield Hit(n)
+            continue
+        if ctx.reference_fields:
+            if m.name not in rows:
+                rows[m.name] = _query_rows(ctx, m)
+            implicit = _implicit_read(ctx, m, n, code, rows[m.name])
+            if implicit:
+                yield Hit(n, implicit)
+
+
+_GET_OBJECT = re.compile(r"\.ПолучитьОбъект\s*\(\s*\)", re.IGNORECASE)
+
+
+def _object_for_write(ctx: FileContext, m: Method, n: int, code: str, found: list[re.Match]) -> bool:
+    """Строка — только `Об = ….ПолучитьОбъект()`, и дальше в том же цикле `Об` записывается/удаляется."""
+    if not all(_GET_OBJECT.search(x.group(0)) for x in found):
+        return False
+    a = _ASSIGN.match(code)
+    if a is None:
+        return False
+    write = re.compile(rf"{_NOT_BEFORE}{re.escape(a.group(1))}\s*\.\s*"
+                       r"(?:Записать|Удалить|УстановитьПометкуУдаления)\s*\(", re.IGNORECASE)
+    body = ctx.model.body(m)
+    depth = body.loop[n]
+    for k in range(n + 1, m.end):
+        if body.loop[k] < depth:
+            break
+        if write.search(body.code[k]):
+            return True
+    return False
+
+
+# --- неявное чтение: представление или реквизит ссылочного поля выборки запроса
+
+_ASSIGN_EXPR = re.compile(rf"^\s*({_W}+)\s*=\s*(.+?)\s*;?\s*$")
+_FOR_EACH = re.compile(rf"{_NOT_BEFORE}Для\s+Каждого\s+({_W}+)\s+Из\s+(.+?)\s+Цикл", re.IGNORECASE)
+_EXECUTE = re.compile(r"\.Выполнить\s*\(\s*\)$", re.IGNORECASE)
+_EXECUTE_BATCH = re.compile(r"\.ВыполнитьПакет\s*\(\s*\)$", re.IGNORECASE)
+_SELECT = re.compile(r"^(.+)\.Выбрать\s*\(.*\)$", re.IGNORECASE)
+_UNLOAD = re.compile(r"^(.+)\.Выгрузить\s*\(.*\)$", re.IGNORECASE)
+_INDEXED = re.compile(rf"^({_W}+)\s*\[.*\]$")
+_FIELD = re.compile(rf"{_NOT_BEFORE}({_W}+)\.({_W}+)")
+_DEREF = re.compile(rf"\s*\.\s*({_W}+)(?!{_W}|\s*\()")
+_MEMBER_CALL = re.compile(rf"\s*\.\s*{_W}+\s*\(")   # `Ссылка.УникальныйИдентификатор()` — без чтения
+_CALL_NAME = re.compile(rf"({_W}+)\s*$")
+_PRESENTING_CALLS = ("строка", "стршаблон")
+
+
+def _query_rows(ctx: FileContext, m: Method) -> frozenset[str]:
+    """Переменные метода — выборка или строка таблицы из результата запроса (casefold):
+    `В = Р.Выбрать()`, `Для Каждого С Из Р.Выгрузить() Цикл`, где Р — `….Выполнить()`,
+    переменная с ним или элемент результата `ВыполнитьПакет()`."""
+    results: set[str] = set()
+    batches: set[str] = set()
+    tables: set[str] = set()
+    rows: set[str] = set()
+
+    def from_result(expr: str) -> bool:
+        expr = expr.strip()
+        if _EXECUTE.search(expr) or expr.casefold() in results:
+            return True
+        i = _INDEXED.match(expr)
+        return i is not None and i.group(1).casefold() in batches
+
+    for n in m.body_lines():
+        code = ctx.model.code(n)
+        a = _ASSIGN_EXPR.match(code)
+        if a:
+            var, expr = a.group(1).casefold(), a.group(2)
+            if _EXECUTE.search(expr):
+                results.add(var)
+            elif _EXECUTE_BATCH.search(expr):
+                batches.add(var)
+            elif (s := _SELECT.match(expr)) and from_result(s.group(1)):
+                rows.add(var)
+            elif (u := _UNLOAD.match(expr)) and from_result(u.group(1)):
+                tables.add(var)
+        f = _FOR_EACH.search(code)
+        if f:
+            src = f.group(2).strip()
+            u = _UNLOAD.match(src)
+            if src.casefold() in tables or (u and from_result(u.group(1))):
+                rows.add(f.group(1).casefold())
+    return frozenset(rows)
+
+
+def _enclosing_call(body, start: int, n: int, col: int) -> str | None:
+    """Имя вызова, непосредственным аргументом которого стоит позиция (строка n, столбец col);
+    оператор может занимать несколько строк. None — не аргумент вызова."""
+    depth = 0
+    line, text = n, body.code[n][:col]
+    while True:
+        for i in range(len(text) - 1, -1, -1):
+            ch = text[i]
+            if ch == ")":
+                depth += 1
+            elif ch == "(":
+                if depth == 0:
+                    name = _CALL_NAME.search(text[:i])
+                    return name.group(1).casefold() if name else None
+                depth -= 1
+            elif ch == ";" and depth == 0:
+                return None
+        line -= 1
+        if line < start:
+            return None
+        text = body.code[line]
+
+
+def _implicit_read(ctx: FileContext, m: Method, n: int, code: str, rows: frozenset[str]) -> str:
+    if not rows:
+        return ""
+    refs = ctx.reference_fields
+    body = ctx.model.body(m)
+    out: list[str] = []
+    for x in _FIELD.finditer(code):
+        if x.group(1).casefold() not in rows or x.group(2).casefold() not in refs:
+            continue
+        if _MEMBER_CALL.match(code, x.end()):
+            continue
+        field_ = f"{x.group(1)}.{x.group(2)}"
+        d = _DEREF.match(code, x.end())
+        if d and d.group(1).casefold() not in ("ссылка", "ref"):
+            out.append(f"{field_}.{d.group(1)} — реквизит ссылки")
+            continue
+        call = _enclosing_call(body, m.start + 1, n, x.start())
+        if call in _PRESENTING_CALLS:
+            out.append(f"Строка({field_})" if call == "строка" else f"{field_} в СтрШаблон")
+        elif code[:x.start()].rstrip().endswith("+") or code[x.end():].lstrip().startswith("+"):
+            out.append(f"{field_} в конкатенации")
+    return f"неявно: {', '.join(dict.fromkeys(out))}" if out else ""
 
 
 def _loop_db_write(ctx: FileContext) -> Iterator[Hit]:
